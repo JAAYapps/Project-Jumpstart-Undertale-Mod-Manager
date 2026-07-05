@@ -22,7 +22,7 @@ namespace MergeTests;
 // write to a temp output), but a copy is the safe habit.
 //
 //   Linux/bash:
-//     export PJUM_TEST_DATAWIN="/home/joshua/Desktop/Undertalesonic/data.win"
+//     export PJUM_TEST_DATAWIN="/path/to/data.win"
 //     dotnet test MergeTests
 //
 // The output file for the visual test is printed to the test log; open THAT
