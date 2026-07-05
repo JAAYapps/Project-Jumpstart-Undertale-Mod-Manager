@@ -142,6 +142,9 @@ public sealed class TextureRepacker
         Dictionary<string, int[]> coords,
         Dictionary<string, string> types)
     {
+        // Just in case I want to make it parallel, but a race condition appeared, so I left it serialized for now.
+        var gate = new object();
+
         using var worker = new TextureWorker();
 
         void RecordSpriteFrame(UndertaleSprite sprite)
@@ -154,8 +157,11 @@ public sealed class TextureRepacker
 
                 string key = $"{sprite.Name.Content}_{i}";
                 worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
-                coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
-                types[key] = "spr";
+                lock (gate)
+                {
+                    coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
+                    types[key] = "spr";
+                }
             }
         }
 
@@ -165,8 +171,11 @@ public sealed class TextureRepacker
             UndertaleTexturePageItem tex = bg.Texture;
             string key = bg.Name.Content;
             worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
-            coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
-            types[key] = "bg";
+            lock (gate)
+            {
+                coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
+                types[key] = "bg";
+            }
         }
 
         void RecordFont(UndertaleFont font)
@@ -175,8 +184,11 @@ public sealed class TextureRepacker
             UndertaleTexturePageItem tex = font.Texture;
             string key = font.Name.Content;
             worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
-            coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
-            types[key] = "fnt";
+            lock (gate)
+            {
+                coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
+                types[key] = "fnt";
+            }
         }
 
         await Task.Run(() =>

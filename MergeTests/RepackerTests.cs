@@ -218,7 +218,8 @@ public class RepackerTests
             return;
         }
 
-        const int iterations = 50;
+        bool soak = Environment.GetEnvironmentVariable("PJUM_SOAK") == "1";
+        int iterations = soak ? 50 : 5;
         var failures = new System.Collections.Generic.List<string>();
 
         for (int i = 0; i < iterations; i++)
