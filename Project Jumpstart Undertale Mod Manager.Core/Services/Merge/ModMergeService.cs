@@ -6,59 +6,153 @@ using System.Threading.Tasks;
 using UndertaleModLib;
 using UndertaleModLib.Compiler;
 using UndertaleModLib.Models;
+using System.Text.Json;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 
-
-
 public sealed class ModMergeService : IModMergeService
 {
-    // IDataService is your existing Core service (load/save UndertaleData).
-    // Kept as a dependency so this class never calls UndertaleIO directly and
-    // stays consistent with the rest of the Core layer.
     private readonly Data.IDataService _data;
-    private readonly TextureRepacker _repacker;
+    private readonly TextureRepacker _repacker = new();
 
-    public ModMergeService(Data.IDataService data)
+    public ModMergeService(Data.IDataService data) => _data = data;
+
+    public async Task<MergeResult> ApplyAsync(
+        string baseDataPath, IReadOnlyList<ModSource> mods, string outputPath)
     {
-        _data = data;
-        _repacker = new TextureRepacker(); // or inject an ITextureRepacker later
-    }
+        // === PHASE 0: read every manifest ===================================
+        var manifests = new Dictionary<string, ModManifest>();
+        foreach (ModSource mod in mods)
+        {
+            if (!TryReadManifest(mod, out ModManifest manifest, out string err))
+                return MergeResult.Fail(mod.Name, err);   // broken mod.json -> abort naming it
+            manifests[mod.Name] = manifest;
+        }
 
-    public async Task<MergeResult> ApplyAsync(string baseDataPath, IReadOnlyList<ModSource> mods, string outputPath)
-    {
-        var warnings = new List<string>();
+        // === PHASE 1: dependency check (hard-fail) ==========================
+        var presentNames = new HashSet<string>(mods.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (ModSource mod in mods)
+        {
+            foreach (string dep in manifests[mod.Name].Requires.Keys)
+            {
+                if (!presentNames.Contains(dep))
+                    return MergeResult.Fail(mod.Name,
+                        $"requires '{dep}', which is not in the mod set. Add it or remove {mod.Name}.");
+            }
+        }
 
-        // --- pre-flight: conflict detection (name-keyed, before any mutation) ---
-        IReadOnlyList<ModConflict> conflicts = DetectConflicts(mods);
-        if (conflicts.Count > 0)
-            return new MergeResult(Success: false, conflicts, warnings);
-
-        // --- 1. load base graph ---
+        // === PHASE 2: load base ONCE (pristine) =============================
         UndertaleData data = await _data.LoadAsync(baseDataPath);
 
-        // --- 2. Tier 1: declarative reference assets ---
-        foreach (ModSource mod in mods)
-            ApplyTier1(data, mod, warnings);
+        // === PHASE 3: gather + parse every address, build the last-wins plan =
+        // assetKey ("category:name") -> the mod that ultimately owns it (later wins),
+        // plus the list of files that mod contributes for that asset.
+        var plan = new Dictionary<string, PlannedAsset>();
+        var conflictLog = new List<ConflictLogEntry>();
+        var overriddenBy = new Dictionary<string, List<string>>(); // assetKey -> earlier mods overridden
 
-        // --- 3. Tier 2: code (compiler handles strings/vars/functions) ---
-        foreach (ModSource mod in mods)
-            ApplyTier2Code(data, mod, warnings);
+        foreach (ModSource mod in mods) // load order
+        {
+            foreach (string file in EnumerateModFiles(mod))
+            {
+                string rel = ToModRelative(mod, file);
+                if (!ModAddressParser.TryParse(rel, out ModAddress addr, out string parseErr))
+                    return MergeResult.Fail(mod.Name, $"bad address '{rel}': {parseErr}");
 
-        // --- 4. collect texture overrides into one flat dir ---
-        string overridesDir = CollectTextureOverrides(mods, warnings);
+                string key = AssetKey(addr);
 
+                if (plan.TryGetValue(key, out PlannedAsset prev) && prev.OwningMod != mod.Name)
+                {
+                    // Conflict: later mod (this one) wins.
+                    if (!overriddenBy.TryGetValue(key, out var list))
+                        overriddenBy[key] = list = new List<string>();
+                    if (!list.Contains(prev.OwningMod)) list.Add(prev.OwningMod);
+                }
+
+                plan[key] = new PlannedAsset(addr, mod.Name, file);
+            }
+        }
+
+        foreach (var kv in overriddenBy)
+            conflictLog.Add(new ConflictLogEntry(kv.Key, plan[kv.Key].OwningMod, kv.Value));
+
+        // === PHASE 4: resolve every planned asset against real data =========
+        // Pure inspection — no mutation. A resolve failure aborts naming the mod.
+        foreach (PlannedAsset pa in plan.Values)
+        {
+            try
+            {
+                ModResolver.Resolve(pa.Address, data, manifests[pa.OwningMod]);
+            }
+            catch (ModResolveException ex)
+            {
+                return MergeResult.Fail(pa.OwningMod,
+                    $"cannot resolve {pa.Address.RelativePath}: {ex.Message}");
+            }
+        }
+
+        // ---- from here, the plan is VALID. Only now do we mutate. ----------
+        var warnings = new List<string>();
+
+        // === PHASE 5: apply ================================================
+        // 5a. Code -> CompileGroup (strings/vars/functions handled by the compiler).
+        var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
+        if (codeAssets.Count > 0)
+        {
+            var group = new CompileGroup(data);
+            foreach (PlannedAsset pa in codeAssets)
+            {
+                UndertaleCode code = data.Code.ByName(pa.Address.AssetName);
+                if (code is null)
+                {
+                    // Declared-new code: create an empty entry to compile into.
+                    // (Full new-code creation is a Tier-1 concern; stub for now.)
+                    warnings.Add($"[{pa.OwningMod}] new code '{pa.Address.AssetName}' creation not wired yet; skipped.");
+                    continue;
+                }
+                group.QueueCodeReplace(code, File.ReadAllText(pa.SourceFile));
+            }
+            CompileResult cr = group.Compile();
+            if (!cr.Successful)
+                return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
+        }
+
+        // 5b. Tier 1 (objects/sounds/paths) -- STUBBED.
+        foreach (PlannedAsset pa in plan.Values)
+        {
+            switch (pa.Address.Category)
+            {
+                case AssetCategory.Objects:
+                case AssetCategory.Sounds:
+                case AssetCategory.Paths:
+                    warnings.Add($"[{pa.OwningMod}] Tier 1 apply for {pa.Address.Category} '{pa.Address.AssetName}' not wired yet; skipped.");
+                    break;
+            }
+        }
+
+        // 5c. Textures -> collect winners into a flat dir, ONE repack at the end.
+        string overridesDir = Path.Combine(Path.GetTempPath(), "pjum_merge_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(overridesDir);
         try
         {
-            // --- 5. one full repack (base + overrides) ---
-            if (Directory.EnumerateFiles(overridesDir, "*.png", SearchOption.AllDirectories).Any())
+            bool anyTexture = false;
+            foreach (PlannedAsset pa in plan.Values)
             {
-                RepackResult repack = await _repacker.RepackAsync(data, overridesDir);
-                warnings.AddRange(repack.Warnings);
+                string flat = ToFlatTextureName(pa.Address);
+                if (flat is null) continue; // not a texture-backed category
+                File.Copy(pa.SourceFile, Path.Combine(overridesDir, flat), overwrite: true);
+                anyTexture = true;
             }
 
-            // --- 6. write merged data file ---
+            if (anyTexture)
+            {
+                RepackResult rr = await _repacker.RepackAsync(data, overridesDir);
+                warnings.AddRange(rr.Warnings);
+            }
+
+            // === PHASE 6: write merged file ================================
             await _data.SaveAsync(data, outputPath);
         }
         finally
@@ -66,129 +160,75 @@ public sealed class ModMergeService : IModMergeService
             TryDelete(overridesDir);
         }
 
-        return new MergeResult(Success: true, Array.Empty<ModConflict>(), warnings);
-    }
-
-    // -- conflict detection (name-keyed ownership ledger) -------------------
-
-    private static IReadOnlyList<ModConflict> DetectConflicts(IReadOnlyList<ModSource> mods)
-    {
-        var owner = new Dictionary<string, string>(); // assetName -> first mod
-        var conflicts = new List<ModConflict>();
-
-        foreach (ModSource mod in mods)
-            foreach (string asset in AssetsTouchedBy(mod))
-            {
-                if (owner.TryGetValue(asset, out string first))
-                    conflicts.Add(new ModConflict(asset, first, mod.Name));
-                else
-                    owner[asset] = mod.Name;
-            }
-
-        return conflicts;
-    }
-
-    /// <summary>
-    /// The declarative manifest IS the folder tree: every asset file's name is
-    /// the asset it touches. A directory walk of the mod folder yields the set.
-    /// </summary>
-    private static IEnumerable<string> AssetsTouchedBy(ModSource mod)
-    {
-        if (!Directory.Exists(mod.ModDirectory))
-            yield break;
-
-        foreach (string file in Directory.EnumerateFiles(mod.ModDirectory, "*", SearchOption.AllDirectories))
-        {
-            // Asset identity = file name without extension, sprite frames
-            // collapsed to their sprite name (spr_susie_0 -> spr_susie) so two
-            // mods editing different frames of the same sprite still conflict.
-            string name = Path.GetFileNameWithoutExtension(file);
-            int lastUnderscore = name.LastIndexOf('_');
-            if (lastUnderscore > 0 && int.TryParse(name[(lastUnderscore + 1)..], out _))
-                name = name[..lastUnderscore];
-            yield return name;
-        }
-    }
-
-    // -- Tier 1: declarative reference assets -------------------------------
-
-    private static void ApplyTier1(UndertaleData data, ModSource mod, List<string> warnings)
-    {
-        // TODO: for each declarative asset in the mod (objects/events, paths,
-        // sounds), resolve targets by NAME and wire references, e.g.:
-        //   var obj = data.GameObjects.ByName("obj_x") ?? create+add;
-        //   obj.Events[(int)evType] ... Actions[0].CodeId = data.Code.ByName(codeName);
-        //   var path = data.Paths.ByName("pth_x") ?? create+add; set Points/IsClosed;
-        //   var snd  = data.Sounds.ByName("snd_x"); set flags; wire AudioFile.
-        // Grouped sounds (GroupID != 0) route to the chapter's audiogroupN.dat,
-        // NOT data.win — handle that when you wire sounds.
-        //
-        // Left as a stub on purpose: every call here is a clean one-liner traced
-        // from the editor files, so build them one asset class at a time.
-    }
-
-    // -- Tier 2: code via the compiler --------------------------------------
-
-    private static void ApplyTier2Code(UndertaleData data, ModSource mod, List<string> warnings)
-    {
-        // Mod code files live under, e.g., <mod>/<game>/<container>/code/*.gml,
-        // each named for its target code entry (gml_Script_x / gml_Object_x_Event).
-        string codeDir = FindCodeDir(mod.ModDirectory);
-        if (codeDir is null) return;
-
-        var group = new CompileGroup(data);
-
-        foreach (string gmlFile in Directory.EnumerateFiles(codeDir, "*.gml", SearchOption.AllDirectories))
-        {
-            string codeName = Path.GetFileNameWithoutExtension(gmlFile);
-            string source = File.ReadAllText(gmlFile);
-
-            UndertaleCode code = data.Code.ByName(codeName);
-            if (code is null)
-            {
-                warnings.Add($"Code entry '{codeName}' not found in target; creating new entries isn't wired yet. Skipped.");
-                continue;
-            }
-
-            group.QueueCodeReplace(code, source);
-        }
-
-        CompileResult result = group.Compile();
-        if (!result.Successful)
-            warnings.Add("GML compile errors: " + result.PrintAllErrors(false));
-    }
-
-    // -- Tier 3 prep: collect texture overrides into a flat dir -------------
-
-    private static string CollectTextureOverrides(IReadOnlyList<ModSource> mods, List<string> warnings)
-    {
-        string flatDir = Path.Combine(Path.GetTempPath(), "pjumpstart_overrides_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(flatDir);
-
-        // TODO: translate each mod's folder layout into the flat naming the
-        // repacker consumes:
-        //   sprites/spr_susie/0.png  ->  spr_susie_0.png
-        //   backgrounds/bg_x.png     ->  bg_x.png
-        //   fonts/fnt_x.png          ->  fnt_x.png
-        // Later mods overwrite earlier ones here (load-order wins); real
-        // cross-mod conflicts were already caught in DetectConflicts.
-
-        return flatDir;
+        return MergeResult.Ok(conflictLog, warnings);
     }
 
     // -- helpers ------------------------------------------------------------
 
-    private static string FindCodeDir(string modDir)
+    private sealed record PlannedAsset(ModAddress Address, string OwningMod, string SourceFile);
+
+    private static string AssetKey(ModAddress a)
     {
-        // Placeholder resolver; replace with your container-addressed layout
-        // (<mod>/<game>/<chapter-or-root>/<container>/code).
-        string candidate = Path.Combine(modDir, "code");
-        return Directory.Exists(candidate) ? candidate : null;
+        // Sprites collapse frames to the sprite name so two mods editing
+        // different frames of the same sprite still count as the same asset.
+        string cat = a.Category.ToString().ToLowerInvariant();
+        return $"{a.Game}/{a.Container}/{cat}:{a.AssetName}";
+    }
+
+    // category translation for the repacker's flat naming; null = not a texture.
+    private static string ToFlatTextureName(ModAddress a)
+    {
+        return a.Category switch
+        {
+            AssetCategory.Sprites     => $"{a.AssetName}_{a.Frame}.png",
+            AssetCategory.Backgrounds => $"{a.AssetName}.png",
+            AssetCategory.Fonts       => $"{a.AssetName}.png",
+            _ => null
+        };
+    }
+
+    private static bool TryReadManifest(ModSource mod, out ModManifest manifest, out string error)
+    {
+        manifest = null; error = null;
+        string path = Path.Combine(mod.ModDirectory, "mod.json");
+        if (!File.Exists(path))
+        {
+            error = "mod.json not found.";
+            return false;
+        }
+        try
+        {
+            manifest = JsonSerializer.Deserialize<ModManifest>(
+                File.ReadAllText(path),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (manifest is null) { error = "mod.json parsed to null."; return false; }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = "mod.json is not valid JSON: " + ex.Message;
+            return false;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateModFiles(ModSource mod)
+    {
+        if (!Directory.Exists(mod.ModDirectory)) yield break;
+        foreach (string f in Directory.EnumerateFiles(mod.ModDirectory, "*", SearchOption.AllDirectories))
+        {
+            if (Path.GetFileName(f).Equals("mod.json", StringComparison.OrdinalIgnoreCase)) continue;
+            yield return f;
+        }
+    }
+
+    private static string ToModRelative(ModSource mod, string fullPath)
+    {
+        string rel = Path.GetRelativePath(mod.ModDirectory, fullPath);
+        return rel.Replace('\\', '/');
     }
 
     private static void TryDelete(string dir)
     {
-        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
-        catch { /* best-effort temp cleanup */ }
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
     }
 }

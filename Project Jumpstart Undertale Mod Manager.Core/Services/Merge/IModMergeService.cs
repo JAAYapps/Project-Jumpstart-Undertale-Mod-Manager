@@ -1,38 +1,53 @@
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 
 // ---------------------------------------------------------------------------
-// The 6-step merge pipeline, apply-in-order + always-repack.
+// Multi-mod dispatcher. Design (locked with Joshua):
 //
+//   * LAST-WINS on conflict. Two mods touching spr_susie is NOT an error —
+//     later mod in load order wins. Logged, not failed.
+//   * DEPENDENCIES hard-fail. A mod's mod.json "requires" another mod that
+//     isn't in the set -> that mod cannot apply -> abort the run naming it.
+//   * VALIDATE-THEN-APPLY. The whole plan (parse + requires + resolve every
+//     address) is checked BEFORE any mutation. If it can't succeed, we abort
+//     having touched nothing and return WHICH mod failed and WHY.
+//   * RETRY is the caller's job: on failure, reload the pristine base and call
+//     ApplyAsync again with the failing mod removed. Every run — including
+//     retries — starts from the untouched base. The base file on disk IS the
+//     rollback; we never half-mutate.
 //
-// PIPELINE (per target data file, e.g. Undertale data.win or
-// Deltarune chapterN_windows/data.win):
-//   1. Load base data file into a live UndertaleData graph.
-//   2. Apply Tier 1 (declarative: objects/events, paths, sounds) — reference ops.
-//   3. Apply Tier 2 (code) — CompileGroup.QueueCodeReplace + Compile.
-//   4. Collect texture overrides (sprites/backgrounds/fonts) into a flat dir.
-//   5. One full repack (TextureRepacker) folding base + overrides together.
-//   6. Write the merged data file back out.
+// This class never prompts. The UI reads MergeResult.FailedMod/Reason and asks
+// "retry without {FailedMod}?", then re-calls with the reduced list.
 //
-// CONFLICTS: mods are applied in load order; an asset touched by two mods is a
-// conflict keyed on asset NAME (not file-relative IDs). Detected while collecting,
-// before any graph mutation, so a conflicted merge can stop clean.
+// Tier 1 asset application (objects/sounds/paths) is STUBBED here — code and
+// textures are wired; the one-liners come next.
 // ---------------------------------------------------------------------------
 
-/// <summary>One mod on disk, already resolved to a folder. Load order is the list order.</summary>
 public sealed record ModSource(string Name, string ModDirectory);
 
-/// <summary>Two mods writing the same named asset in the same target container.</summary>
-public sealed record ModConflict(string AssetName, string FirstMod, string SecondMod);
+/// <summary>One mod-vs-mod overlap. Not a failure — the record of who won.</summary>
+public sealed record ConflictLogEntry(string AssetKey, string WinningMod, IReadOnlyList<string> OverriddenMods);
 
-public sealed record MergeResult(bool Success, IReadOnlyList<ModConflict> Conflicts, IReadOnlyList<string> Warnings);
+public sealed record MergeResult(
+    bool Success,
+    string FailedMod,                          // null on success
+    string Reason,                             // null on success
+    IReadOnlyList<ConflictLogEntry> Conflicts, // last-wins record (informational)
+    IReadOnlyList<string> Warnings)
+{
+    public static MergeResult Ok(IReadOnlyList<ConflictLogEntry> conflicts, IReadOnlyList<string> warnings)
+        => new(true, null, null, conflicts, warnings);
+
+    public static MergeResult Fail(string mod, string reason)
+        => new(false, mod, reason, Array.Empty<ConflictLogEntry>(), Array.Empty<string>());
+}
 
 public interface IModMergeService
 {
     /// <summary>
-    /// Applies <paramref name="mods"/> (in order) onto the base data file at
-    /// <paramref name="baseDataPath"/> and writes the merged result to
-    /// <paramref name="outputPath"/>. If two mods collide on an asset name the
-    /// merge stops before writing and the conflicts are returned.
+    /// Merge <paramref name="mods"/> (in load order — later wins) onto the base
+    /// data file, writing to <paramref name="outputPath"/>. Validates the whole
+    /// plan first; on any failure returns Success=false naming the failing mod
+    /// and does NOT write. On success, writes the merged file.
     /// </summary>
     Task<MergeResult> ApplyAsync(string baseDataPath, IReadOnlyList<ModSource> mods, string outputPath);
 }

@@ -46,6 +46,13 @@ public sealed class ModManifest
     [JsonPropertyName("integrityHash")]
     public string? IntegrityHash { get; set; }
 
+    // Dependencies, keyed by required mod NAME -> version constraint string
+    // (e.g. ">=1.0.0"). A required mod not present in the merge set is a HARD
+    // FAIL — the dependent mod can't apply correctly without it. Version
+    // constraints are parsed but not yet enforced in v1 (presence is).
+    [JsonPropertyName("requires")]
+    public Dictionary<string, string> Requires { get; set; } = new();
+
     // category -> assetName -> properties. Empty/absent means "declares nothing new".
     [JsonPropertyName("newAssets")]
     public Dictionary<string, Dictionary<string, NewAssetEntry>> NewAssets { get; set; } = new();
