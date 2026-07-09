@@ -8,7 +8,6 @@ using UndertaleModLib.Models;
 using UndertaleModLib.Util;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace MergeTests;
 

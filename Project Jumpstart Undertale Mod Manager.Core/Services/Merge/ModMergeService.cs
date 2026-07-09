@@ -12,6 +12,10 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 
+// See IModMergeService.cs for the full design contract. This file is the impl.
+// DIR-MODEL: ApplyAsync mutates <gameDir>/data.win (and any audiogroupN.dat)
+// in place. gameDir is a prepared, disposable copy owned by the caller.
+
 public sealed class ModMergeService : IModMergeService
 {
     private readonly Data.IDataService _data;
@@ -19,9 +23,13 @@ public sealed class ModMergeService : IModMergeService
 
     public ModMergeService(Data.IDataService data) => _data = data;
 
-    public async Task<MergeResult> ApplyAsync(
-        string baseDataPath, IReadOnlyList<ModSource> mods, string outputPath)
+    public async Task<MergeResult> ApplyAsync(string gameDir, IReadOnlyList<ModSource> mods)
     {
+        // gameDir must contain data.win directly (see contract).
+        string dataWinPath = Path.Combine(gameDir, "data.win");
+        if (!File.Exists(dataWinPath))
+            return MergeResult.Fail("(setup)", $"data.win not found in game directory: {gameDir}");
+
         // === PHASE 0: read every manifest ===================================
         var manifests = new Dictionary<string, ModManifest>();
         foreach (ModSource mod in mods)
@@ -43,15 +51,13 @@ public sealed class ModMergeService : IModMergeService
             }
         }
 
-        // === PHASE 2: load base ONCE (pristine) =============================
-        UndertaleData data = await _data.LoadAsync(baseDataPath);
+        // === PHASE 2: load the game's data.win ONCE =========================
+        UndertaleData data = await _data.LoadAsync(dataWinPath);
 
         // === PHASE 3: gather + parse every address, build the last-wins plan =
-        // assetKey ("category:name") -> the mod that ultimately owns it (later wins),
-        // plus the list of files that mod contributes for that asset.
         var plan = new Dictionary<string, PlannedAsset>();
         var conflictLog = new List<ConflictLogEntry>();
-        var overriddenBy = new Dictionary<string, List<string>>(); // assetKey -> earlier mods overridden
+        var overriddenBy = new Dictionary<string, List<string>>();
 
         foreach (ModSource mod in mods) // load order
         {
@@ -65,7 +71,6 @@ public sealed class ModMergeService : IModMergeService
 
                 if (plan.TryGetValue(key, out PlannedAsset prev) && prev.OwningMod != mod.Name)
                 {
-                    // Conflict: later mod (this one) wins.
                     if (!overriddenBy.TryGetValue(key, out var list))
                         overriddenBy[key] = list = new List<string>();
                     if (!list.Contains(prev.OwningMod)) list.Add(prev.OwningMod);
@@ -79,25 +84,25 @@ public sealed class ModMergeService : IModMergeService
             conflictLog.Add(new ConflictLogEntry(kv.Key, plan[kv.Key].OwningMod, kv.Value));
 
         // === PHASE 4: resolve every planned asset against real data =========
-        // Pure inspection — no mutation. A resolve failure aborts naming the mod.
-        foreach (PlannedAsset pa in plan.Values)
+        var resolutions = new Dictionary<string, ResolutionKind>();
+        foreach (var kv in plan)
         {
             try
             {
-                ModResolver.Resolve(pa.Address, data, manifests[pa.OwningMod]);
+                ResolvedAsset r = ModResolver.Resolve(kv.Value.Address, data, manifests[kv.Value.OwningMod]);
+                resolutions[kv.Key] = r.Kind;
             }
             catch (ModResolveException ex)
             {
-                return MergeResult.Fail(pa.OwningMod,
-                    $"cannot resolve {pa.Address.RelativePath}: {ex.Message}");
+                return MergeResult.Fail(kv.Value.OwningMod,
+                    $"cannot resolve {kv.Value.Address.RelativePath}: {ex.Message}");
             }
         }
 
-        // ---- from here, the plan is VALID. Only now do we mutate. ----------
+        // ---- plan is VALID. Only now do we mutate. ------------------------
         var warnings = new List<string>();
 
-        // === PHASE 5: apply ================================================
-        // 5a. Code -> CompileGroup (strings/vars/functions handled by the compiler).
+        // === PHASE 5a: code -> CompileGroup ================================
         var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
         if (codeAssets.Count > 0)
         {
@@ -107,8 +112,6 @@ public sealed class ModMergeService : IModMergeService
                 UndertaleCode code = data.Code.ByName(pa.Address.AssetName);
                 if (code is null)
                 {
-                    // Declared-new code: create an empty entry to compile into.
-                    // (Full new-code creation is a Tier-1 concern; stub for now.)
                     warnings.Add($"[{pa.OwningMod}] new code '{pa.Address.AssetName}' creation not wired yet; skipped.");
                     continue;
                 }
@@ -119,20 +122,81 @@ public sealed class ModMergeService : IModMergeService
                 return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
         }
 
-        // 5b. Tier 1 (objects/sounds/paths) -- STUBBED.
-        foreach (PlannedAsset pa in plan.Values)
+        // === PHASE 5b: Tier 1 (paths wired; sounds wired; objects stubbed) ==
+        // Sounds are grouped by asset first, because a sound is up to TWO files
+        // (<name>.json metadata + <name>.ogg/.wav bytes) sharing one asset key.
+        var soundBundles = new Dictionary<string, SoundBundle>();
+
+        foreach (var kv in plan)
         {
+            PlannedAsset pa = kv.Value;
+            bool create = resolutions[kv.Key] == ResolutionKind.Create;
+
             switch (pa.Address.Category)
             {
-                case AssetCategory.Objects:
-                case AssetCategory.Sounds:
                 case AssetCategory.Paths:
-                    warnings.Add($"[{pa.OwningMod}] Tier 1 apply for {pa.Address.Category} '{pa.Address.AssetName}' not wired yet; skipped.");
+                    try { Paths.PathImporter.Apply(data, pa.Address, pa.SourceFile, create); }
+                    catch (Exception ex)
+                    {
+                        return MergeResult.Fail(pa.OwningMod,
+                            $"failed applying path {pa.Address.RelativePath}: {ex.Message}");
+                    }
                     break;
+
+                case AssetCategory.Sounds:
+                    // A sound is up to two files sharing one asset key; the plan
+                    // dict only kept one. Record the owning mod + asset once;
+                    // we re-scan the mod's folder for both files below.
+                    soundBundles.TryAdd(kv.Key, new SoundBundle(pa.Address, pa.OwningMod, create));
+                    break;
+
+                case AssetCategory.Objects:
+                    try
+                    {
+                        Objects.ObjectImporter.Apply(data, pa.Address, pa.SourceFile, create);
+                    }
+                    catch (Exception ex)
+                    {
+                        return MergeResult.Fail(pa.OwningMod, $"failed applying object {pa.Address.RelativePath}: {ex.Message}");
+                    }
+                    break;
+                // NOTE on ordering: EventHandlerFor may CREATE an empty code entry
+                // (gml_Object_<name>_<evt>). If a mod ALSO ships that code file, the code/
+                // importer (PHASE 5a) compiles into it. PHASE 5a currently runs BEFORE 5b, so
+                // on a fresh object the code entry won't exist yet when 5a runs -> the code
+                // gets skipped with a "new code creation not wired yet" warning. For v1 that's
+                // acceptable (object + its code in one mod, code compiles on a REPLACE of an
+                // existing object). Fully supporting "new object + new event code in one pass"
+                // means running object wiring before code compile, or a second compile pass.
+                // Flag for later; not tonight.
             }
         }
 
-        // 5c. Textures -> collect winners into a flat dir, ONE repack at the end.
+        foreach (SoundBundle b in soundBundles.Values)
+        {
+            // Re-scan the owning mod for both files by asset name (the plan
+            // collapsed them into one entry, so don't trust a single SourceFile).
+            ModSource owner = mods.First(m => m.Name == b.OwningMod);
+            string jsonFile = FindSoundFile(owner, b.Address, ".json");
+            string audioFile = FindSoundFile(owner, b.Address, ".wav", ".ogg", ".mp3");
+
+            if (jsonFile is null)
+            {
+                warnings.Add($"[{b.OwningMod}] sound '{b.Address.AssetName}' has no .json metadata; skipped.");
+                continue;
+            }
+            try
+            {
+                Sounds.SoundImporter.Apply(data, gameDir, b.Address, jsonFile, audioFile, b.Create);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(b.OwningMod,
+                    $"failed applying sound {b.Address.RelativePath}: {ex.Message}");
+            }
+        }
+
+        // === PHASE 5c: textures -> one repack at the end ====================
         string overridesDir = Path.Combine(Path.GetTempPath(), "pjum_merge_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(overridesDir);
         try
@@ -141,7 +205,7 @@ public sealed class ModMergeService : IModMergeService
             foreach (PlannedAsset pa in plan.Values)
             {
                 string flat = ToFlatTextureName(pa.Address);
-                if (flat is null) continue; // not a texture-backed category
+                if (flat is null) continue;
                 File.Copy(pa.SourceFile, Path.Combine(overridesDir, flat), overwrite: true);
                 anyTexture = true;
             }
@@ -152,8 +216,8 @@ public sealed class ModMergeService : IModMergeService
                 warnings.AddRange(rr.Warnings);
             }
 
-            // === PHASE 6: write merged file ================================
-            await _data.SaveAsync(data, outputPath);
+            // === PHASE 6: write data.win back IN PLACE =====================
+            await _data.SaveAsync(data, dataWinPath);
         }
         finally
         {
@@ -167,15 +231,44 @@ public sealed class ModMergeService : IModMergeService
 
     private sealed record PlannedAsset(ModAddress Address, string OwningMod, string SourceFile);
 
+    // Find <assetName>.<ext> for a sound within the owning mod, matching the
+    // asset's addressed location (same route/container). Returns null if absent.
+    private static string FindSoundFile(ModSource mod, ModAddress addr, params string[] exts)
+    {
+        foreach (string file in EnumerateModFiles(mod))
+        {
+            string rel = Path.GetRelativePath(mod.ModDirectory, file).Replace('\\', '/');
+            if (!ModAddressParser.TryParse(rel, out ModAddress a, out _)) continue;
+            if (a.Category != AssetCategory.Sounds) continue;
+            if (a.AssetName != addr.AssetName) continue;
+            if (a.Container != addr.Container) continue;   // same audiogroup/container
+            string ext = Path.GetExtension(file).ToLowerInvariant();
+            foreach (string want in exts)
+                if (ext == want) return file;
+        }
+        return null;
+    }
+    
+    // Pairs a sound's json + audio files (same asset key) for one Apply call.
+    private sealed class SoundBundle
+    {
+        public ModAddress Address { get; }
+        public string OwningMod { get; }
+        public bool Create { get; }
+        public string JsonFile { get; set; }
+        public string AudioFile { get; set; }
+        public SoundBundle(ModAddress addr, string owningMod, bool create)
+        {
+            Address = addr; OwningMod = owningMod; Create = create;
+        }
+    }
+
     private static string AssetKey(ModAddress a)
     {
-        // Sprites collapse frames to the sprite name so two mods editing
-        // different frames of the same sprite still count as the same asset.
         string cat = a.Category.ToString().ToLowerInvariant();
         return $"{a.Game}/{a.Container}/{cat}:{a.AssetName}";
     }
 
-    // category translation for the repacker's flat naming; null = not a texture.
     private static string ToFlatTextureName(ModAddress a)
     {
         return a.Category switch

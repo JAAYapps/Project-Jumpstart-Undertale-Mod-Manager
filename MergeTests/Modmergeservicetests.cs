@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using ImageMagick;
 using UndertaleModLib;
@@ -9,14 +10,13 @@ using UndertaleModLib.Util;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace MergeTests;
 
-// End-to-end dispatcher tests. Gated on PJUM_TEST_DATAWIN. Builds tiny synthetic
-// mod folders on disk, runs the multi-mod merge, and checks the plan behaves:
-// last-wins on conflict, hard-fail on missing dependency, clean abort (no file
-// written) on failure.
+// End-to-end dispatcher tests, DIR-MODEL. Gated on PJUM_TEST_DATAWIN. Each test
+// prepares a temp game dir containing data.win, runs the merge into it, and
+// asserts against <dir>/data.win. Last-wins on conflict; hard-fail on missing
+// dependency; no mutation on failure.
 public class ModMergeServiceTests
 {
     private readonly ITestOutputHelper _out;
@@ -24,7 +24,6 @@ public class ModMergeServiceTests
 
     private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
 
-    // Minimal IDataService stand-in so the test doesn't depend on the app's DI.
     private sealed class DirectDataService : IDataService
     {
         public Task<UndertaleData> LoadAsync(string path)
@@ -48,7 +47,8 @@ public class ModMergeServiceTests
         return null;
     }
 
-    // Write a mod that overrides frame 0 of `sprite`, tinted a solid color.
+    private static UndertaleSprite FindSprite(UndertaleData d, string name) => d.Sprites.ByName(name);
+
     private static void WriteSpriteMod(string dir, string modName, string sprite,
         UndertaleData data, MagickColor tint)
     {
@@ -59,7 +59,6 @@ public class ModMergeServiceTests
         string frameDir = Path.Combine(dir, "undertale", "data.win", "sprites", sprite);
         Directory.CreateDirectory(frameDir);
 
-        // Export the real frame for correct dimensions, then flood it with tint.
         string framePath = Path.Combine(frameDir, "0.png");
         using (var worker = new TextureWorker())
             worker.ExportAsPNG(FindSprite(data, sprite).Textures[0].Texture, framePath);
@@ -70,7 +69,14 @@ public class ModMergeServiceTests
         }
     }
 
-    private static UndertaleSprite FindSprite(UndertaleData d, string name) => d.Sprites.ByName(name);
+    // Prepare a temp game dir: <dir>/data.win = a copy of the source.
+    private static string PrepareGameDir(string src)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "pjum_gamedir_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        File.Copy(src, Path.Combine(dir, "data.win"), overwrite: true);
+        return dir;
+    }
 
     [Fact]
     public async Task TwoMods_sameSprite_lastWins()
@@ -86,7 +92,7 @@ public class ModMergeServiceTests
         string root = Path.Combine(Path.GetTempPath(), "pjum_multimod_" + Guid.NewGuid().ToString("N"));
         string modA = Path.Combine(root, "ModA");
         string modB = Path.Combine(root, "ModB");
-        string outPath = Path.Combine(root, "merged.win");
+        string gameDir = PrepareGameDir(src);
 
         try
         {
@@ -96,22 +102,22 @@ public class ModMergeServiceTests
             var svc = new ModMergeService(new DirectDataService());
             var mods = new List<ModSource>
             {
-                new("ModA", modA),   // load order: A first...
-                new("ModB", modB),   // ...B last -> B should win
+                new("ModA", modA),   // A first...
+                new("ModB", modB),   // ...B last -> B wins
             };
 
-            MergeResult result = await svc.ApplyAsync(src, mods, outPath);
+            MergeResult result = await svc.ApplyAsync(gameDir, mods);
 
             Assert.True(result.Success, result.Reason);
-            Assert.True(File.Exists(outPath), "merged file was not written");
-
-            // Conflict logged, ModB recorded as winner.
+            Assert.True(File.Exists(Path.Combine(gameDir, "data.win")), "data.win missing after merge");
             Assert.Contains(result.Conflicts, c => c.WinningMod == "ModB");
-            _out.WriteLine("conflict winner: " + string.Join(", ", result.Conflicts.Select(c => $"{c.AssetKey} -> {c.WinningMod}")));
+            _out.WriteLine("conflict winner: " +
+                string.Join(", ", result.Conflicts.Select(c => $"{c.AssetKey} -> {c.WinningMod}")));
         }
         finally
         {
             TryDelete(root);
+            TryDelete(gameDir);
         }
     }
 
@@ -123,29 +129,34 @@ public class ModMergeServiceTests
 
         string root = Path.Combine(Path.GetTempPath(), "pjum_dep_" + Guid.NewGuid().ToString("N"));
         string modC = Path.Combine(root, "ModC");
-        string outPath = Path.Combine(root, "merged.win");
+        string gameDir = PrepareGameDir(src);
 
         try
         {
             Directory.CreateDirectory(modC);
-            // ModC requires "SonicBase", which is NOT in the set.
             File.WriteAllText(Path.Combine(modC, "mod.json"),
                 "{ \"name\": \"ModC\", \"version\": \"1.0.0\", \"requires\": { \"SonicBase\": \">=1.0.0\" } }");
+
+            // Capture data.win bytes before, to prove no mutation on failure.
+            string dataWin = Path.Combine(gameDir, "data.win");
+            long lenBefore = new FileInfo(dataWin).Length;
 
             var svc = new ModMergeService(new DirectDataService());
             var mods = new List<ModSource> { new("ModC", modC) };
 
-            MergeResult result = await svc.ApplyAsync(src, mods, outPath);
+            MergeResult result = await svc.ApplyAsync(gameDir, mods);
 
             Assert.False(result.Success);
             Assert.Equal("ModC", result.FailedMod);
             Assert.Contains("SonicBase", result.Reason);
-            Assert.False(File.Exists(outPath), "no file should be written on a failed merge");
+            // data.win untouched (dependency fails in phase 1, before load/save).
+            Assert.Equal(lenBefore, new FileInfo(dataWin).Length);
             _out.WriteLine("hard-fail reason: " + result.Reason);
         }
         finally
         {
             TryDelete(root);
+            TryDelete(gameDir);
         }
     }
 

@@ -190,27 +190,58 @@ public partial class GameViewModel : ViewModelBase
         SelectedMod = newMod;
     }
     
+    // REPLACE the whole SaveAndPlayAsync method in GameViewModel.cs with this.
+// It compiles against the new dir-model ApplyAsync(gameDir, mods) and lands the
+// commit. The full temp-copy + launch + cleanup lifecycle is the LAUNCHER piece
+// (next session) — marked TODO here, not silently missing.
+ 
     [RelayCommand]
     public async Task SaveAndPlayAsync()
     {
         if (string.IsNullOrEmpty(SelectedExecutable) || string.IsNullOrEmpty(SelectedDataFile))
             return;
-
-        string basePath = Path.Combine(GameDirectory, SelectedDataFile);
-        string tempPath = Path.Combine(GameDirectory, "MyMod.temp");   // temp-run style
-
+ 
+        // ---- LAUNCHER TODO (next session): --------------------------------
+        // 1. Create <managerRoot>/tempgame/<guid>/ .
+        // 2. Copy the whole GameDirectory (or the Deltarune chapter dir) into it
+        //    so data.win + audiogroupN.dat + loose .ogg are all present.
+        // 3. Merge into that copy (below).
+        // 4. Launch the runner with --game <tempdir>/<SelectedExecutable>.
+        // 5. Delete the temp dir when the game process exits.
+        // For now we merge into a temp copy but do not yet copy the full game
+        // dir or launch — this keeps the app compiling and the merge callable
+        // while the launcher lifecycle is built as its own focused piece.
+        // -------------------------------------------------------------------
+ 
+        string managerRoot = AppContext.BaseDirectory;
+        string tempGameDir = Path.Combine(managerRoot, "tempgame", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempGameDir);
+ 
+        // Minimal prep so the merge has a data.win to work on. The real launcher
+        // will copy the ENTIRE game directory here (step 2 above).
+        File.Copy(
+            Path.Combine(GameDirectory, SelectedDataFile),
+            Path.Combine(tempGameDir, "data.win"),
+            overwrite: true);
+ 
         List<ModSource> modList = new List<ModSource>();
         foreach (var modItem in Mods)
             modList.Add(new ModSource(modItem.Name, modItem.ModDirectory));
-        
-        var result = await _mergeService.ApplyAsync(basePath, modList, tempPath);
-
+ 
+        var result = await _mergeService.ApplyAsync(tempGameDir, modList);
+ 
         if (!result.Success)
         {
-            // show result.Conflicts via a dialog service — VM stays UI-only
+            // TODO (launcher/UI): show the "retry without {result.FailedMod}?"
+            // prompt via the dialog service, then re-run with that mod removed.
+            // VM stays UI-only; Core already returns FailedMod/Reason.
             return;
         }
-
-        _launcherService.LaunchGame(GameDirectory, SelectedExecutable, "MyMod.temp");
+ 
+        // TODO (launcher): copy full game dir + launch --game against
+        //   Path.Combine(tempGameDir, SelectedExecutable) + delete on exit.
+        // The old direct LaunchGame call assumed the merged file sat in
+        // GameDirectory; under the dir-model it lives in tempGameDir instead.
+        // _launcherService.LaunchGame(tempGameDir, SelectedExecutable, "data.win");
     }
 }
