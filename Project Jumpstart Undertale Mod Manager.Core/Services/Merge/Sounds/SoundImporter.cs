@@ -85,6 +85,11 @@ public static class SoundImporter
             if (needAGRP)
             {
                 string relName = $"audiogroup{audioGroupID}.dat";
+                if (soundData is null)
+                    throw new InvalidOperationException(
+                        $"Sound '{name}': a streamed OGG can't live in audiogroup '{relName}'. " +
+                        $"Streamed audio must be a loose .ogg in the game directory, or set \"embedded\": true.");
+                
                 if (audioGroupID < data.AudioGroups.Count
                     && data.AudioGroups[audioGroupID] is UndertaleAudioGroup { Path.Content: string custom }
                     && !string.IsNullOrEmpty(custom))
