@@ -101,6 +101,7 @@ public sealed class TextureRepacker
             // 1. Export every existing texture-backed asset, recording coords.
             var assetCoordinateDict = new Dictionary<string, int[]>();
             var assetTypeDict = new Dictionary<string, string>();
+            
             await ExportExistingAsync(data, texturesDir, assetCoordinateDict, assetTypeDict);
 
             // 2. Overlay the mod's overrides (same filename => overwrite => mod wins).
@@ -111,9 +112,31 @@ public sealed class TextureRepacker
             }
 
             // 3. Wipe existing pages/items — we rebuild all of them.
-            data.TexturePageItems.Clear();
-            data.EmbeddedTextures.Clear();
+            // data.TexturePageItems.Clear();
+            // data.EmbeddedTextures.Clear();
 
+            // Embedded images (GM 2022.6+, e.g. fallbacktexture.png) own page items that no
+            // sprite/bg/font references. They aren't moddable assets and must survive the
+            // repack untouched, so keep their page items + backing textures out of the wipe.
+            var keepItems = new HashSet<UndertaleTexturePageItem>();
+            var keepTex   = new HashSet<UndertaleEmbeddedTexture>();
+            if (data.EmbeddedImages is not null)
+                foreach (var ei in data.EmbeddedImages)
+                {
+                    var pi = ei?.TextureEntry;
+                    if (pi is null) continue;
+                    keepItems.Add(pi);
+                    if (pi.TexturePage is not null) keepTex.Add(pi.TexturePage);
+                }
+
+            for (int i = data.TexturePageItems.Count - 1; i >= 0; i--)
+                if (!keepItems.Contains(data.TexturePageItems[i]))
+                    data.TexturePageItems.RemoveAt(i);
+
+            for (int i = data.EmbeddedTextures.Count - 1; i >= 0; i--)
+                if (!keepTex.Contains(data.EmbeddedTextures[i]))
+                    data.EmbeddedTextures.RemoveAt(i);
+            
             // 4. Pack the whole pile.
             string atlasDescPath = Path.Combine(workRoot, "atlas.txt");
             var packer = new Packer { FitHeuristic = BestFitHeuristic.Area };
@@ -122,10 +145,25 @@ public sealed class TextureRepacker
                 packer.Process(texturesDir, "*.png", _atlasSize, _padding, debugMode: false);
                 packer.SaveAtlasses(atlasDescPath);
             });
-
+            
             // 5. Rebuild the graph from the packed atlases.
-            int pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, warnings);
+            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, warnings);
 
+            // Repoint TextureGroupInfo (TGIN) at the freshly-built pages. The old page
+            // objects were Cleared at step 3, so every group still holds dangling refs to
+            // them — which blow up on write as KeyNotFound. Undertale has no meaningful
+            // TGIN so this loop no-ops there; Deltarune populates it and needs the fixup.
+            if (data.TextureGroupInfo is { Count: > 0 })
+            {
+                foreach (UndertaleTextureGroupInfo group in data.TextureGroupInfo)
+                {
+                    group.TexturePages.Clear();
+                    foreach (UndertaleEmbeddedTexture page in data.EmbeddedTextures)
+                        group.TexturePages.Add(
+                            new UndertaleResourceById<UndertaleEmbeddedTexture, UndertaleChunkTXTR> { Resource = page });
+                }
+            }
+            
             return new RepackResult(packer.Atlasses.Count, pageItems, warnings);
         }
         finally
