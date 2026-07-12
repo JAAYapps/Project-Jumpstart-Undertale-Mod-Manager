@@ -17,7 +17,7 @@ public class ModResolverTests
     private readonly ITestOutputHelper _out;
     public ModResolverTests(ITestOutputHelper output) => _out = output;
 
-    private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
+    private static string SourceDataWin => TestPaths.DataWin;
 
     private static UndertaleData Load(string path)
     {

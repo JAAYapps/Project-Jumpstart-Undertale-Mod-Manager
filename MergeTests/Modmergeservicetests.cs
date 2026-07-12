@@ -22,7 +22,7 @@ public class ModMergeServiceTests
     private readonly ITestOutputHelper _out;
     public ModMergeServiceTests(ITestOutputHelper output) => _out = output;
 
-    private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
+    private static string SourceDataWin => TestPaths.DataWin;
 
     private sealed class DirectDataService : IDataService
     {

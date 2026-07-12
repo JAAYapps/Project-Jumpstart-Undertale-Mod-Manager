@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Undertale round-trip alone is ~140s; give the session room. -->
+    <TestSessionTimeout>600000</TestSessionTimeout>
+
+    <EnvironmentVariables>
+      <!-- Discovery is automatic. Uncomment ONLY to override auto-find,
+           e.g. to force the Undertale data.win or a non-Steam copy: -->
+      <!-- <PJUM_TEST_DATAWIN>/path/to/data.win</PJUM_TEST_DATAWIN> -->
+      <!-- <PJUM_TEST_DELTARUNE_CHAPTER>/path/to/chapter1_windows</PJUM_TEST_DELTARUNE_CHAPTER> -->
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

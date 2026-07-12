@@ -18,7 +18,7 @@ public class PathImporterTests
     private readonly ITestOutputHelper _out;
     public PathImporterTests(ITestOutputHelper output) => _out = output;
 
-    private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
+    private static string SourceDataWin => TestPaths.DataWin;
 
     private sealed class DirectDataService : IDataService
     {

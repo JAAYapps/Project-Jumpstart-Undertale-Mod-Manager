@@ -30,8 +30,8 @@ public class SoundImporterTests
     private readonly ITestOutputHelper _out;
     public SoundImporterTests(ITestOutputHelper output) => _out = output;
 
-    private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
-    private static string DeltaruneChapterDir => Environment.GetEnvironmentVariable("PJUM_TEST_DELTARUNE_CHAPTER");
+    private static string SourceDataWin => TestPaths.DataWin;
+    private static string DeltaruneChapterDir => TestPaths.DeltaruneChapter;
 
     private static UndertaleData Load(string path)
     {

@@ -23,7 +23,7 @@ public class MultiFrameSpriteTests
     private readonly ITestOutputHelper _out;
     public MultiFrameSpriteTests(ITestOutputHelper output) => _out = output;
 
-    private static string SourceDataWin => Environment.GetEnvironmentVariable("PJUM_TEST_DATAWIN");
+    private static string SourceDataWin => TestPaths.DataWin;
 
     // Opaque, far-apart colors — distinct under a 12% fuzz.
     private static readonly MagickColor[] Palette =
