@@ -1,10 +1,7 @@
-using System;
-using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UndertaleModLib;
 using UndertaleModLib.Models;
-using UndertaleModLib.Util;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Sounds;
@@ -59,7 +56,7 @@ public static class SoundImporter
         bool isOgg = type.Equals(".ogg", StringComparison.OrdinalIgnoreCase);
         bool embedSound = !isOgg || json.Embedded;   // WAV always embeds
         
-        UndertaleSound existing = create ? null : data.Sounds.ByName(name);
+        var existing = create ? null : data.Sounds.ByName(name);
         if (!create && existing is null)
             throw new InvalidOperationException($"Sound '{name}' expected to exist (Replace) but was not found.");
 
@@ -68,20 +65,20 @@ public static class SoundImporter
         // where replaceSoundPropertiesCheck is false.)
         bool metadataOnly = audioFile is null;
 
-        int audioID = -1;
-        UndertaleEmbeddedAudio finalAudioReference = null;
+        int audioId = -1;
+        UndertaleEmbeddedAudio? finalAudioReference = null;
 
-        if (!metadataOnly)
+        if (audioFile is not null)
         {
             // --- create embedded audio entry if required ---
-            UndertaleEmbeddedAudio soundData = null;
+            UndertaleEmbeddedAudio? soundData = null;
             if (embedSound)   // (embedSound && !needAGRP) || needAGRP  == embedSound here
             {
                 soundData = new UndertaleEmbeddedAudio { Data = File.ReadAllBytes(audioFile) };
                 data.EmbeddedAudio.Add(soundData);
                 if (existing?.AudioFile is not null && !needAGRP)
                     data.EmbeddedAudio.Remove(existing.AudioFile);
-                audioID = data.EmbeddedAudio.Count - 1;
+                audioId = data.EmbeddedAudio.Count - 1;
             }
 
             // --- external audiogroup .dat, if needed ---
@@ -105,7 +102,7 @@ public static class SoundImporter
                     groupDat = UndertaleIO.Read(read);
 
                 groupDat.EmbeddedAudio.Add(soundData);
-                audioID = groupDat.EmbeddedAudio.Count - 1;
+                audioId = groupDat.EmbeddedAudio.Count - 1;
 
                 using (var write = new FileStream(datPath, FileMode.Create, FileAccess.Write))
                     UndertaleIO.Write(write, groupDat);
@@ -116,12 +113,12 @@ public static class SoundImporter
                 string dest = Path.Combine(gameDir, name + (Path.GetExtension(audioFile) ?? ".ogg"));
                 if (Path.GetFullPath(audioFile) != Path.GetFullPath(dest))
                     File.Copy(audioFile, dest, overwrite: true);
-                audioID = -1;
+                audioId = -1;
             }
 
             // --- final embedded-audio reference (source lines 472-484) ---
             if (!embedSound)            finalAudioReference = null;
-            else if (embedSound && !needAGRP) finalAudioReference = data.EmbeddedAudio[audioID];
+            else if (embedSound && !needAGRP) finalAudioReference = data.EmbeddedAudio[audioId];
             else                        finalAudioReference = null;  // embed && needAGRP
         }
 
@@ -137,9 +134,7 @@ public static class SoundImporter
             flags = UndertaleSound.AudioEntryFlags.Regular;
 
         // --- final audio group reference (source lines 487-495) ---
-        UndertaleAudioGroup finalGroupReference =
-            !usesAGRP ? null
-            : (needAGRP ? data.AudioGroups[audioGroupID] : data.AudioGroups[builtin]);
+        UndertaleAudioGroup? finalGroupReference = !usesAGRP ? null : (needAGRP ? data.AudioGroups[audioGroupID] : data.AudioGroups[builtin]);
 
         int finalGroupID = needAGRP ? audioGroupID : builtin;
         string typeStr = isOgg ? ".ogg" : ".wav";
@@ -174,7 +169,7 @@ public static class SoundImporter
         sound.Effects = json.Effects;
         sound.Volume = json.Volume;
         sound.Pitch = json.Pitch;
-        sound.AudioID = audioID;
+        sound.AudioID = audioId;
         sound.AudioFile = finalAudioReference;
         sound.AudioGroup = finalGroupReference;
         sound.GroupID = finalGroupID;
