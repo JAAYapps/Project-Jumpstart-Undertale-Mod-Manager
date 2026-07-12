@@ -61,7 +61,7 @@ public sealed class ModMergeService : IModMergeService
 
         foreach (ModSource mod in mods) // load order
         {
-            foreach (string file in EnumerateModFiles(mod))
+            foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
             {
                 string rel = ToModRelative(mod, file);
                 if (!ModAddressParser.TryParse(rel, out ModAddress addr, out string parseErr))
@@ -204,10 +204,27 @@ public sealed class ModMergeService : IModMergeService
             bool anyTexture = false;
             foreach (PlannedAsset pa in plan.Values)
             {
-                string flat = ToFlatTextureName(pa.Address);
-                if (flat is null) continue;
-                File.Copy(pa.SourceFile, Path.Combine(overridesDir, flat), overwrite: true);
-                anyTexture = true;
+                // Only sprites/backgrounds/fonts have a flat texture name.
+                if (ToFlatTextureName(pa.Address) is null) continue;
+
+                // The plan collapsed every frame of a sprite into ONE entry (AssetKey has
+                // no frame index). Re-scan the WINNING mod for all frame files of THIS
+                // asset so every frame reaches the repacker — not just the last one
+                // enumerated. Mirrors how sounds re-scan for their json+audio pair.
+                ModSource owner = mods.First(m => m.Name == pa.OwningMod);
+                foreach (string file in EnumerateModFiles(owner, manifests[owner.Name]))
+                {
+                    string rel = ToModRelative(owner, file);
+                    if (!ModAddressParser.TryParse(rel, out ModAddress a, out _)) continue;
+                    if (a.Category  != pa.Address.Category)  continue;
+                    if (a.AssetName != pa.Address.AssetName) continue;
+                    if (a.Container != pa.Address.Container) continue;
+
+                    string flat = ToFlatTextureName(a);
+                    if (flat is null) continue;
+                    File.Copy(file, Path.Combine(overridesDir, flat), overwrite: true);
+                    anyTexture = true;
+                }
             }
 
             if (anyTexture)
@@ -303,13 +320,24 @@ public sealed class ModMergeService : IModMergeService
             return false;
         }
     }
-
-    private static IEnumerable<string> EnumerateModFiles(ModSource mod)
+    
+    private static IEnumerable<string> EnumerateModFiles(ModSource mod, ModManifest manifest = null)
     {
         if (!Directory.Exists(mod.ModDirectory)) yield break;
+
+        // Manager metadata that lives in the mod folder but is NOT a game asset.
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "mod.json" };
+        if (!string.IsNullOrEmpty(manifest?.ImageFileName))
+            skip.Add(manifest.ImageFileName);
+
         foreach (string f in Directory.EnumerateFiles(mod.ModDirectory, "*", SearchOption.AllDirectories))
         {
-            if (Path.GetFileName(f).Equals("mod.json", StringComparison.OrdinalIgnoreCase)) continue;
+            // Only skip metadata sitting at the mod ROOT — a game asset legitimately
+            // named splash.png deeper in the tree must still merge.
+            string rel = Path.GetRelativePath(mod.ModDirectory, f);
+            bool atRoot = !rel.Contains(Path.DirectorySeparatorChar) && !rel.Contains('/');
+            if (atRoot && skip.Contains(Path.GetFileName(f))) continue;
+
             yield return f;
         }
     }

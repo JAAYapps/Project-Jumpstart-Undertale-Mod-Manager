@@ -57,6 +57,8 @@ public sealed class ModManifest
     [JsonPropertyName("newAssets")]
     public Dictionary<string, Dictionary<string, NewAssetEntry>> NewAssets { get; set; } = new();
 
+    public string? ImageFileName { get; set; }
+    
     /// <summary>True if this manifest declares (category, name) as a new asset.</summary>
     public bool DeclaresNew(string category, string name, out NewAssetEntry entry)
     {

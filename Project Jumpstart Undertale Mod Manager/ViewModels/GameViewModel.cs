@@ -7,11 +7,16 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MsBox.Avalonia.Enums;
+using Project_Jumpstart_Undertale_Mod_Manager.Models;
+using Project_Jumpstart_Undertale_Mod_Manager.Reporting;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
 
@@ -30,6 +35,14 @@ public partial class GameViewModel : ViewModelBase
     
     public ObservableCollection<ModItem> Mods { get; } = new ObservableCollection<ModItem>();
 
+    public ObservableCollection<MergeTarget> MergeTargets { get; } = new();
+
+    [ObservableProperty]
+    private MergeTarget? _selectedTarget;
+
+    // True only when there's a real choice to make — drives picker visibility.
+    public bool HasMultipleTargets => MergeTargets.Count > 1;
+    
     [ObservableProperty]
     public partial string SelectedExecutable { get; set; } = string.Empty;
 
@@ -64,6 +77,9 @@ public partial class GameViewModel : ViewModelBase
         // Set defaults if files exist
         if (Executables.Count > 0) SelectedExecutable = Executables[0];
         if (DataFiles.Count > 0) SelectedDataFile = DataFiles[0];
+        
+        DiscoverMergeTargets();
+        if (MergeTargets.Count > 0) SelectedTarget = MergeTargets[0];
         
         RefreshMods();
     }
@@ -190,58 +206,166 @@ public partial class GameViewModel : ViewModelBase
         SelectedMod = newMod;
     }
     
-    // REPLACE the whole SaveAndPlayAsync method in GameViewModel.cs with this.
-// It compiles against the new dir-model ApplyAsync(gameDir, mods) and lands the
-// commit. The full temp-copy + launch + cleanup lifecycle is the LAUNCHER piece
-// (next session) — marked TODO here, not silently missing.
- 
     [RelayCommand]
     public async Task SaveAndPlayAsync()
     {
-        if (string.IsNullOrEmpty(SelectedExecutable) || string.IsNullOrEmpty(SelectedDataFile))
+        if (SelectedTarget is null || string.IsNullOrEmpty(SelectedExecutable))
             return;
- 
-        // ---- LAUNCHER TODO (next session): --------------------------------
-        // 1. Create <managerRoot>/tempgame/<guid>/ .
-        // 2. Copy the whole GameDirectory (or the Deltarune chapter dir) into it
-        //    so data.win + audiogroupN.dat + loose .ogg are all present.
-        // 3. Merge into that copy (below).
-        // 4. Launch the runner with --game <tempdir>/<SelectedExecutable>.
-        // 5. Delete the temp dir when the game process exits.
-        // For now we merge into a temp copy but do not yet copy the full game
-        // dir or launch — this keeps the app compiling and the merge callable
-        // while the launcher lifecycle is built as its own focused piece.
-        // -------------------------------------------------------------------
- 
+
         string managerRoot = AppContext.BaseDirectory;
+        
+        SweepTempGames(managerRoot); // Just in case try to delete doesn't work.
+
         string tempGameDir = Path.Combine(managerRoot, "tempgame", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempGameDir);
- 
-        // Minimal prep so the merge has a data.win to work on. The real launcher
-        // will copy the ENTIRE game directory here (step 2 above).
-        File.Copy(
-            Path.Combine(GameDirectory, SelectedDataFile),
-            Path.Combine(tempGameDir, "data.win"),
-            overwrite: true);
- 
-        List<ModSource> modList = new List<ModSource>();
-        foreach (var modItem in Mods)
-            modList.Add(new ModSource(modItem.Name, modItem.ModDirectory));
- 
-        var result = await _mergeService.ApplyAsync(tempGameDir, modList);
- 
-        if (!result.Success)
+
+        try
         {
-            // TODO (launcher/UI): show the "retry without {result.FailedMod}?"
-            // prompt via the dialog service, then re-run with that mod removed.
-            // VM stays UI-only; Core already returns FailedMod/Reason.
-            return;
+            CopyGameDir(GameDirectory, tempGameDir);
+
+            string relTargetDir = Path.GetRelativePath(GameDirectory, SelectedTarget.DataDirectory);
+            string mergeDir = Path.Combine(tempGameDir, relTargetDir);
+
+            string dataInTarget = Path.Combine(mergeDir, "data.win");
+            if (!File.Exists(dataInTarget))
+                File.Copy(Path.Combine(mergeDir, SelectedTarget.DataFileName), dataInTarget, overwrite: true);
+
+            var modList = new List<ModSource>();
+            foreach (var m in Mods)
+                if (m.IsEnabled)
+                    modList.Add(new ModSource(m.Name, m.ModDirectory));
+
+            var result = await _mergeService.ApplyAsync(mergeDir, modList);
+
+            string report = MergeReport.Format(result);
+            MainWindowViewModel.SendLog(report);
+            string logPath = Path.Combine(managerRoot, "last_merge.log");
+            try { File.WriteAllText(logPath, report); } catch { }
+
+            if (!result.Success)
+            {
+                await (Application.Current?.ShowError(
+                    $"{result.FailedMod}: {result.Reason}", "Merge failed") ?? Task.FromResult(ButtonResult.Ok));
+                return;
+            }
+
+            if (result.Warnings.Count > 0)
+            {
+                await (Application.Current?.ShowWarning(
+                    string.Join("\n", result.Warnings) + $"\n\nFull log: {logPath}",
+                    "Merge completed with warnings") ?? Task.FromResult(ButtonResult.Ok));
+            }
+
+            // Launch and wait for the process.
+            await _launcherService.LaunchAndWaitAsync(tempGameDir, SelectedExecutable, "data.win", MainWindowViewModel.SendLog);
         }
- 
-        // TODO (launcher): copy full game dir + launch --game against
-        //   Path.Combine(tempGameDir, SelectedExecutable) + delete on exit.
-        // The old direct LaunchGame call assumed the merged file sat in
-        // GameDirectory; under the dir-model it lives in tempGameDir instead.
-        // _launcherService.LaunchGame(tempGameDir, SelectedExecutable, "data.win");
+        catch (Exception ex)
+        {
+            await (Application.Current?.ShowError(ex.Message, "Launch failed") ?? Task.FromResult(ButtonResult.Ok));
+            MainWindowViewModel.SendLog(ex.Message);
+        }
+        finally
+        {
+            TryDeleteDir(tempGameDir);
+        }
+    }
+
+    private static void CopyGameDir(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+        foreach (string dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(sourceDir, dir);
+            if (rel.Split(Path.DirectorySeparatorChar)[0].Equals("mods", StringComparison.OrdinalIgnoreCase))
+                continue;   // don't copy the manager's own mods folder into the runtime
+            Directory.CreateDirectory(Path.Combine(destDir, rel));
+        }
+        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(sourceDir, file);
+            if (rel.Split(Path.DirectorySeparatorChar)[0].Equals("mods", StringComparison.OrdinalIgnoreCase))
+                continue;
+            string target = Path.Combine(destDir, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: true);
+        }
+    }
+
+    private static void TryDeleteDir(string dir)
+    {
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch
+        {
+            // ignored
+        }
+    }
+    
+    private void DiscoverMergeTargets()
+    {
+        MergeTargets.Clear();
+
+        // Deltarune: each chapter keeps its own data.win in chapterN_windows/.
+        // Detect by looking for those folders first.
+        var chapterDirs = Directory.GetDirectories(GameDirectory, "chapter*_windows")
+            .OrderBy(d => d)
+            .ToList();
+
+        if (chapterDirs.Count > 0)
+        {
+            foreach (string dir in chapterDirs)
+            {
+                if (!File.Exists(Path.Combine(dir, "data.win"))) continue;
+                string folder = new DirectoryInfo(dir).Name;         // "chapter1_windows"
+                string label  = PrettyChapterName(folder);           // "Chapter 1"
+                MergeTargets.Add(new MergeTarget { DisplayName = label, DataDirectory = dir });
+            }
+            return;   // a Deltarune-style install: chapters ARE the targets
+        }
+
+        // Undertale (and anything single-data): the game root is the one target.
+        if (File.Exists(Path.Combine(GameDirectory, "data.win")))
+            MergeTargets.Add(new MergeTarget { DisplayName = GameName, DataDirectory = GameDirectory });
+        else if (!string.IsNullOrEmpty(SelectedDataFile))
+            // Fallback: a .unx or oddly-named data file at the root.
+            MergeTargets.Add(new MergeTarget
+            {
+                DisplayName = GameName,
+                DataDirectory = GameDirectory,
+                DataFileName = SelectedDataFile
+            });
+    }
+
+    private static string PrettyChapterName(string folder)
+    {
+        // "chapter1_windows" -> "Chapter 1"
+        var m = System.Text.RegularExpressions.Regex.Match(folder, @"chapter(\d+)");
+        return m.Success ? $"Chapter {m.Groups[1].Value}" : folder;
+    }
+    
+    private static void SweepTempGames(string managerRoot, string? keepDir = null)
+    {
+        string tempRoot = Path.Combine(managerRoot, "tempgame");
+        if (!Directory.Exists(tempRoot)) return;
+
+        string? keepFull = keepDir is null ? null : Path.GetFullPath(keepDir);
+
+        foreach (string dir in Directory.GetDirectories(tempRoot))
+        {
+            if (keepFull is not null &&
+                Path.GetFullPath(dir).Equals(keepFull, StringComparison.Ordinal))
+                continue;
+            try { Directory.Delete(dir, true); }
+            catch
+            {
+                MainWindowViewModel.SendLog($"Couldn't delete {dir}");
+                // ignored
+            }
+        }
+    }
+
+    public void OnUnload()
+    {
+        string tempRoot = AppContext.BaseDirectory;
+        if (!Directory.Exists(tempRoot)) return;
+        SweepTempGames(tempRoot);
     }
 }

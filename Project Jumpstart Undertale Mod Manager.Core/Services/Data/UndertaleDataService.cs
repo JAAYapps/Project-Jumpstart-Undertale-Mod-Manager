@@ -2,7 +2,7 @@ using UndertaleModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 
-public class UndertaleDataService
+public class UndertaleDataService : IDataService
 {
     public async Task<UndertaleData> LoadAsync(string dataPath)
     {

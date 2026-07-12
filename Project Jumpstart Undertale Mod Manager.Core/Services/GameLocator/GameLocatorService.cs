@@ -24,7 +24,11 @@ public class GameLocatorService : IGameLocatorService
                 var customGames = JsonSerializer.Deserialize<List<string>>(json);
                 if (customGames != null)
                 {
-                    foundPaths.AddRange(customGames);
+                    foreach (var customGame in customGames)
+                    {
+                        if (Directory.Exists(customGame))
+                            foundPaths.Add(customGame);
+                    }
                 }
             }
             catch
@@ -41,7 +45,6 @@ public class GameLocatorService : IGameLocatorService
 
         foreach (var library in libraryPaths)
         {
-            Console.WriteLine($"Found {library} installations");
             string steamappsPath = Path.Combine(library, "steamapps");
             if (!Directory.Exists(steamappsPath)) continue;
 

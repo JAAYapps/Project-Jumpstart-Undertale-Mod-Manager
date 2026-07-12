@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="using:Project_Jumpstart_Undertale_Mod_Manager.ViewModels"
              xmlns:conv="using:Project_Jumpstart_Undertale_Mod_Manager.Converters"
+             xmlns:models="using:Project_Jumpstart_Undertale_Mod_Manager.Models"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:DataType="vm:GameViewModel"
              x:Class="Project_Jumpstart_Undertale_Mod_Manager.Views.GameView">
@@ -56,7 +57,20 @@
         </TabItem>
         
         <TabItem Header="Codes"/>
-        <TabItem Header="Game Config"/>
+        <TabItem Header="Game Config">
+            <StackPanel IsVisible="{Binding HasMultipleTargets}" Spacing="5">
+                <TextBlock Text="Chapter / Merge Target:" FontWeight="Bold" Margin="0,10,0,0"/>
+                <ComboBox ItemsSource="{Binding MergeTargets}"
+                          SelectedItem="{Binding SelectedTarget}"
+                          Width="400">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:MergeTarget">
+                            <TextBlock Text="{Binding DisplayName}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
+        </TabItem>
         
         <TabItem Header="Manager Config">
             <StackPanel Margin="10" Spacing="10">
