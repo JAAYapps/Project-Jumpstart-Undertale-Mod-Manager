@@ -16,12 +16,9 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 // DIR-MODEL: ApplyAsync mutates <gameDir>/data.win (and any audiogroupN.dat)
 // in place. gameDir is a prepared, disposable copy owned by the caller.
 
-public sealed class ModMergeService : IModMergeService
+public sealed class ModMergeService(Data.IDataService dataService) : IModMergeService
 {
-    private readonly Data.IDataService _data;
     private readonly TextureRepacker _repacker = new();
-
-    public ModMergeService(Data.IDataService data) => _data = data;
 
     public async Task<MergeResult> ApplyAsync(string gameDir, IReadOnlyList<ModSource> mods)
     {
@@ -52,7 +49,7 @@ public sealed class ModMergeService : IModMergeService
         }
 
         // === PHASE 2: load the game's data.win ONCE =========================
-        UndertaleData data = await _data.LoadAsync(dataWinPath);
+        UndertaleData data = await dataService.LoadAsync(dataWinPath);
 
         // === PHASE 3: gather + parse every address, build the last-wins plan =
         var plan = new Dictionary<string, PlannedAsset>();
@@ -234,7 +231,7 @@ public sealed class ModMergeService : IModMergeService
             }
 
             // === PHASE 6: write data.win back IN PLACE =====================
-            await _data.SaveAsync(data, dataWinPath);
+            await dataService.SaveAsync(data, dataWinPath);
         }
         finally
         {

@@ -10,6 +10,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
 using Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
 using Project_Jumpstart_Undertale_Mod_Manager.Views;
 
@@ -41,7 +42,7 @@ public partial class App : Application
         {
             var mainWindow = new MainWindow();
             desktop.MainWindow = mainWindow;
-            
+            Current?.SetMessageMainWindow(mainWindow);
             // Create the ViewModel, mixing DI services with the window's StorageProvider
             mainWindow.DataContext = ActivatorUtilities.CreateInstance<MainWindowViewModel>(
                 Services, 
