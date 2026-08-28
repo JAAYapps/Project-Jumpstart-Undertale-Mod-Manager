@@ -185,12 +185,12 @@ public sealed class TextureRepacker
 
         using var worker = new TextureWorker();
 
-        void RecordSpriteFrame(UndertaleSprite sprite)
+        void RecordSpriteFrame(UndertaleSprite? sprite)
         {
             if (sprite is null) return;
             for (int i = 0; i < sprite.Textures.Count; i++)
             {
-                UndertaleTexturePageItem tex = sprite.Textures[i]?.Texture;
+                UndertaleTexturePageItem? tex = sprite.Textures[i]?.Texture;
                 if (tex is null) continue;
 
                 string key = $"{sprite.Name.Content}_{i}";
@@ -205,7 +205,7 @@ public sealed class TextureRepacker
 
         void RecordBackground(UndertaleBackground bg)
         {
-            if (bg?.Texture is null) return;
+            if (bg.Texture is null) return;
             UndertaleTexturePageItem tex = bg.Texture;
             string key = bg.Name.Content;
             worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
@@ -218,7 +218,7 @@ public sealed class TextureRepacker
 
         void RecordFont(UndertaleFont font)
         {
-            if (font?.Texture is null) return;
+            if (font.Texture is null) return;
             UndertaleTexturePageItem tex = font.Texture;
             string key = font.Name.Content;
             worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
@@ -251,7 +251,7 @@ public sealed class TextureRepacker
         int lastTextPageItem = data.TexturePageItems.Count - 1;
 
         string prefix = Path.Combine(
-            Path.GetDirectoryName(atlasDescPath)!,
+            Path.GetDirectoryName(atlasDescPath) ?? "",
             Path.GetFileNameWithoutExtension(atlasDescPath));
 
         int atlasCount = 0;
@@ -286,7 +286,7 @@ public sealed class TextureRepacker
                 data.TexturePageItems.Add(pageItem);
 
                 string stripped = Path.GetFileNameWithoutExtension(n.Texture.Source);
-                string assetType = ResolveAssetType(stripped, types, warnings);
+                string? assetType = ResolveAssetType(stripped, types, warnings);
                 if (assetType is null)
                     continue; // unknown name — warning already recorded
 
@@ -312,9 +312,9 @@ public sealed class TextureRepacker
         return lastTextPageItem + 1;
     }
 
-    private static string ResolveAssetType(string stripped, Dictionary<string, string> types, List<string> warnings)
+    private static string? ResolveAssetType(string stripped, Dictionary<string, string> types, List<string> warnings)
     {
-        if (types.TryGetValue(stripped, out string known))
+        if (types.TryGetValue(stripped, out string? known))
             return known;
 
         // Brand-new mod asset (not in the base export). Fall back to prefix.
@@ -342,7 +342,7 @@ public sealed class TextureRepacker
     private static void RestoreTargetBounds(
         UndertaleTexturePageItem tex, string name, Node n, Dictionary<string, int[]> coords)
     {
-        if (coords.TryGetValue(name, out int[] c))
+        if (coords.TryGetValue(name, out int[]? c))
         {
             tex.TargetX = (ushort)c[0];
             tex.TargetY = (ushort)c[1];
@@ -453,7 +453,7 @@ public sealed class TextureRepacker
         {
             for (int x = 0; x < n.Bounds.Width; x++)
             {
-                IMagickColor<byte> px = atlasPixels.GetPixel(x + n.Bounds.X, y + n.Bounds.Y).ToColor();
+                IMagickColor<byte>? px = atlasPixels.GetPixel(x + n.Bounds.X, y + n.Bounds.Y).ToColor();
                 maskBits[y * width + x] = px is not null && px.A > 0;
             }
         }
@@ -494,7 +494,7 @@ public sealed class TextureRepacker
 
     private sealed class TextureInfo
     {
-        public string Source;
+        public required string Source;
         public int Width;
         public int Height;
     }
@@ -514,7 +514,7 @@ public sealed class TextureRepacker
     private sealed class Node
     {
         public Rect Bounds;
-        public TextureInfo Texture;
+        public TextureInfo? Texture;
         public SplitType SplitType;
     }
 
@@ -522,26 +522,19 @@ public sealed class TextureRepacker
     {
         public int Width;
         public int Height;
-        public List<Node> Nodes;
+        public List<Node> Nodes = [];
     }
 
     private sealed class Packer
     {
-        public List<TextureInfo> SourceTextures;
-        public StringWriter Log;
-        public StringWriter Error;
-        public int Padding;
-        public int AtlasSize;
+        private List<TextureInfo> SourceTextures = [];
+        private readonly StringWriter Log = new();
+        private readonly StringWriter Error = new();
+        private int Padding;
+        private int AtlasSize;
         public bool DebugMode;
         public BestFitHeuristic FitHeuristic;
-        public List<Atlas> Atlasses;
-
-        public Packer()
-        {
-            SourceTextures = new List<TextureInfo>();
-            Log = new StringWriter();
-            Error = new StringWriter();
-        }
+        public List<Atlas> Atlasses = [];
 
         public void Process(string sourceDir, string pattern, int atlasSize, int padding, bool debugMode)
         {
@@ -581,7 +574,7 @@ public sealed class TextureRepacker
         {
             int atlasCount = 0;
             string prefix = Path.Combine(
-                Path.GetDirectoryName(destination)!,
+                Path.GetDirectoryName(destination) ?? "",
                 Path.GetFileNameWithoutExtension(destination));
 
             using var tw = new StreamWriter(destination);
@@ -668,9 +661,9 @@ public sealed class TextureRepacker
             if (n2.Bounds.Width > 0 && n2.Bounds.Height > 0) list.Add(n2);
         }
 
-        private TextureInfo FindBestFitForNode(Node node, List<TextureInfo> textures)
+        private TextureInfo? FindBestFitForNode(Node node, List<TextureInfo> textures)
         {
-            TextureInfo bestFit = null;
+            TextureInfo? bestFit = null;
             float nodeArea = node.Bounds.Width * node.Bounds.Height;
             float maxCriteria = 0.0f;
 
@@ -716,7 +709,7 @@ public sealed class TextureRepacker
                 Node node = freeList[0];
                 freeList.RemoveAt(0);
 
-                TextureInfo bestFit = FindBestFitForNode(node, textures);
+                TextureInfo? bestFit = FindBestFitForNode(node, textures);
                 if (bestFit != null)
                 {
                     if (node.SplitType == SplitType.Horizontal)

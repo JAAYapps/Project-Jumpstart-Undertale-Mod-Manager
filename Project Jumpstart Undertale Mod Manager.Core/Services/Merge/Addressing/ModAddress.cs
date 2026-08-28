@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 
@@ -126,12 +127,12 @@ public static class ModAddressParser
             : ParseSingleFile(game, route, category, assetSegments, relativePath);
     }
 
-    public static bool TryParse(string relativePath, out ModAddress address, out string error)
+    public static bool TryParse(string relativePath, [NotNullWhen(true)] out ModAddress? address, out string error)
     {
         try
         {
             address = Parse(relativePath);
-            error = null;
+            error = "";
             return true;
         }
         catch (ModAddressFormatException ex)

@@ -41,9 +41,9 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Objects;
 
 public sealed class ObjectJson
 {
-    [JsonPropertyName("sprite")]     public string Sprite { get; set; }
-    [JsonPropertyName("parent")]     public string Parent { get; set; }
-    [JsonPropertyName("maskSprite")] public string MaskSprite { get; set; }
+    [JsonPropertyName("sprite")]     public string? Sprite { get; set; }
+    [JsonPropertyName("parent")]     public string? Parent { get; set; }
+    [JsonPropertyName("maskSprite")] public string? MaskSprite { get; set; }
 
     [JsonPropertyName("visible")]    public bool? Visible { get; set; }
     [JsonPropertyName("solid")]      public bool? Solid { get; set; }
@@ -51,12 +51,12 @@ public sealed class ObjectJson
     [JsonPropertyName("depth")]      public int? Depth { get; set; }
 
     [JsonPropertyName("events")]     public List<ObjectEventJson> Events { get; set; } = new();
-    [JsonPropertyName("physics")]    public PhysicsJson Physics { get; set; }
+    [JsonPropertyName("physics")]    public PhysicsJson? Physics { get; set; }
 }
 
 public sealed class ObjectEventJson
 {
-    [JsonPropertyName("type")]    public string Type { get; set; }     // "Create", "Step", "Collision", ...
+    [JsonPropertyName("type")]    public string? Type { get; set; }     // "Create", "Step", "Collision", ...
     [JsonPropertyName("subtype")] public uint Subtype { get; set; }    // 0 for Create/Destroy; varies otherwise
 }
 
@@ -64,7 +64,7 @@ public sealed class PhysicsJson
 {
     [JsonPropertyName("uses")]           public bool? Uses { get; set; }
     [JsonPropertyName("sensor")]         public bool? Sensor { get; set; }
-    [JsonPropertyName("shape")]          public string Shape { get; set; }   // "Circle" | "Box" | "Custom"
+    [JsonPropertyName("shape")]          public string? Shape { get; set; }   // "Circle" | "Box" | "Custom"
     [JsonPropertyName("density")]        public float? Density { get; set; }
     [JsonPropertyName("restitution")]    public float? Restitution { get; set; }
     [JsonPropertyName("group")]          public uint? Group { get; set; }
@@ -154,7 +154,7 @@ public static class ObjectImporter
         };
     }
 
-    private static EventType ParseEventType(string type, string obj)
+    private static EventType ParseEventType(string? type, string obj)
     {
         if (Enum.TryParse<EventType>(type, ignoreCase: true, out EventType t))
             return t;
@@ -167,9 +167,7 @@ public static class ObjectImporter
     {
         try
         {
-            ObjectJson json = JsonSerializer.Deserialize<ObjectJson>(
-                File.ReadAllText(file),
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            ObjectJson? json = JsonSerializer.Deserialize<ObjectJson>(File.ReadAllText(file), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (json is null)
                 throw new InvalidOperationException($"Object JSON '{file}' parsed to null.");
             return json;

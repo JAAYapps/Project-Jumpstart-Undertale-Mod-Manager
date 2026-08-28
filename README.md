@@ -43,7 +43,7 @@ dotnet run --project "Project Jumpstart Undertale Mod Manager/Project Jumpstart 
 
 ## Status
 
-What works: sprites / (code / sounds / objects not tested but passes the Unit tests and merge tests) / texture merging, Steam game detection, launch. What's in progress: project-system GUI, etc.
+What works: sprites, sounds, (code and objects not tested but passes the Unit tests and merge tests), texture merging, Steam game detection, launch. What's in progress: project-system GUI, etc.
 
 ## Credits
 

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
@@ -60,7 +59,7 @@ public sealed class ModManifest
     public string? ImageFileName { get; set; }
     
     /// <summary>True if this manifest declares (category, name) as a new asset.</summary>
-    public bool DeclaresNew(string category, string name, out NewAssetEntry entry)
+    public bool DeclaresNew(string category, string name, out NewAssetEntry? entry)
     {
         entry = null;
         return NewAssets.TryGetValue(category, out var byName)

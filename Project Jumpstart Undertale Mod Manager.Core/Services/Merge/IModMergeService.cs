@@ -28,15 +28,15 @@ public sealed record ConflictLogEntry(string AssetKey, string WinningMod, IReadO
 
 public sealed record MergeResult(
     bool Success,
-    string FailedMod,                          // null on success
-    string Reason,                             // null on success
+    string? FailedMod,                          // null on success
+    string? Reason,                             // null on success
     IReadOnlyList<ConflictLogEntry> Conflicts, // last-wins record (informational)
     IReadOnlyList<string> Warnings)
 {
     public static MergeResult Ok(IReadOnlyList<ConflictLogEntry> conflicts, IReadOnlyList<string> warnings)
         => new(true, null, null, conflicts, warnings);
 
-    public static MergeResult Fail(string mod, string reason)
+    public static MergeResult Fail(string mod, string? reason)
         => new(false, mod, reason, Array.Empty<ConflictLogEntry>(), Array.Empty<string>());
 }
 

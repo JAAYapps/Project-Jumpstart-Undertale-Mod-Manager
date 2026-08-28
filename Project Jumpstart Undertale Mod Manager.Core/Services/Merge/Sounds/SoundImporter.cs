@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UndertaleModLib;
@@ -28,7 +29,7 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Sounds;
 
 public sealed class SoundJson
 {
-    [JsonPropertyName("type")]         public string Type { get; set; }
+    [JsonPropertyName("type")]         public string? Type { get; set; } = null;
     [JsonPropertyName("embedded")]     public bool Embedded { get; set; } = true;
     [JsonPropertyName("decodeOnLoad")] public bool DecodeOnLoad { get; set; }
     [JsonPropertyName("volume")]       public float Volume { get; set; } = 1f;
@@ -40,19 +41,19 @@ public static class SoundImporter
 {
     public static void Apply(
         UndertaleData data, string gameDir, ModAddress addr,
-        string jsonFile, string audioFile, bool create)
+        string jsonFile, string? audioFile, bool create)
     {
         SoundJson json = ReadJson(jsonFile);
         string name = addr.AssetName;
 
-        bool usesAGRP = data.AudioGroups is { Count: > 0 };
+        bool usesAGrp = data.AudioGroups is { Count: > 0 };
         int builtin = data.GetBuiltinSoundGroupID();
 
         // --- resolve group from the address container (Option 2) ---
-        int audioGroupID = ResolveGroupIDFromContainer(data, addr, builtin);
-        bool needAGRP = usesAGRP && audioGroupID != builtin;
+        int audioGroupId = ResolveGroupIdFromContainer(data, addr, builtin);
+        bool needAGrp = usesAGrp && audioGroupId != builtin;
 
-        string type = json.Type ?? Path.GetExtension(audioFile ?? "") ?? "";
+        string type = json.Type ?? Path.GetExtension(audioFile ?? "");
         bool isOgg = type.Equals(".ogg", StringComparison.OrdinalIgnoreCase);
         bool embedSound = !isOgg || json.Embedded;   // WAV always embeds
         
@@ -76,22 +77,22 @@ public static class SoundImporter
             {
                 soundData = new UndertaleEmbeddedAudio { Data = File.ReadAllBytes(audioFile) };
                 data.EmbeddedAudio.Add(soundData);
-                if (existing?.AudioFile is not null && !needAGRP)
+                if (existing?.AudioFile is not null && !needAGrp)
                     data.EmbeddedAudio.Remove(existing.AudioFile);
                 audioId = data.EmbeddedAudio.Count - 1;
             }
 
             // --- external audiogroup .dat, if needed ---
-            if (needAGRP)
+            if (needAGrp)
             {
-                string relName = $"audiogroup{audioGroupID}.dat";
+                string relName = $"audiogroup{audioGroupId}.dat";
                 if (soundData is null)
                     throw new InvalidOperationException(
                         $"Sound '{name}': a streamed OGG can't live in audiogroup '{relName}'. " +
                         $"Streamed audio must be a loose .ogg in the game directory, or set \"embedded\": true.");
                 
-                if (audioGroupID < data.AudioGroups.Count
-                    && data.AudioGroups[audioGroupID] is UndertaleAudioGroup { Path.Content: string custom }
+                if (audioGroupId < data.AudioGroups.Count
+                    && data.AudioGroups[audioGroupId] is UndertaleAudioGroup { Path.Content: string custom }
                     && !string.IsNullOrEmpty(custom))
                 {
                     relName = custom;
@@ -123,12 +124,12 @@ public static class SoundImporter
 
             // --- final embedded-audio reference (source lines 472-484) ---
             if (!embedSound)            finalAudioReference = null;
-            else if (embedSound && !needAGRP) finalAudioReference = data.EmbeddedAudio[audioId];
+            else if (embedSound && !needAGrp) finalAudioReference = data.EmbeddedAudio[audioId];
             else                        finalAudioReference = null;  // embed && needAGRP
         }
 
         // --- flags (source lines 445-470) ---
-        var flags = UndertaleSound.AudioEntryFlags.Regular;
+        UndertaleSound.AudioEntryFlags flags;
         if (isOgg && embedSound && json.DecodeOnLoad)
             flags = UndertaleSound.AudioEntryFlags.IsEmbedded | UndertaleSound.AudioEntryFlags.IsCompressed | UndertaleSound.AudioEntryFlags.Regular;
         else if (isOgg && embedSound && !json.DecodeOnLoad)
@@ -139,20 +140,16 @@ public static class SoundImporter
             flags = UndertaleSound.AudioEntryFlags.Regular;
 
         // --- final audio group reference (source lines 487-495) ---
-        UndertaleAudioGroup? finalGroupReference = !usesAGRP ? null : (needAGRP ? data.AudioGroups[audioGroupID] : data.AudioGroups[builtin]);
+        UndertaleAudioGroup? finalGroupReference = !usesAGrp ? null : (needAGrp ? data.AudioGroups[audioGroupId] : data.AudioGroups[builtin]);
 
-        int finalGroupID = needAGRP ? audioGroupID : builtin;
+        int finalGroupId = needAGrp ? audioGroupId : builtin;
         string typeStr = isOgg ? ".ogg" : ".wav";
         string fileStr = name + typeStr;
 
         // --- create or update the sound asset ---
-        UndertaleSound sound = existing;
-        if (create)
-        {
-            sound = new UndertaleSound { Name = data.Strings.MakeString(name) };
-            data.Sounds.Add(sound);
-        }
-
+        UndertaleSound sound = (create ? new UndertaleSound { Name = data.Strings.MakeString(name) } : existing) ?? throw new DataException("Somehow the sound entry was missing.");
+        if (create) data.Sounds.Add(sound);
+        
         if (metadataOnly && !create)
         {
             // Properties only; audio untouched (source's third branch).
@@ -162,7 +159,7 @@ public static class SoundImporter
             sound.Effects = json.Effects;
             sound.Volume = json.Volume;
             sound.Pitch = json.Pitch;
-            sound.GroupID = finalGroupID;
+            sound.GroupID = finalGroupId;
             sound.AudioGroup = finalGroupReference;
             // AudioFile / AudioID intentionally left as-is.
             return;
@@ -177,12 +174,12 @@ public static class SoundImporter
         sound.AudioID = audioId;
         sound.AudioFile = finalAudioReference;
         sound.AudioGroup = finalGroupReference;
-        sound.GroupID = finalGroupID;
+        sound.GroupID = finalGroupId;
     }
 
     // Container names the group; its index in Data.AudioGroups is the GroupID.
     // Container "data.win" (or any non-group name) => builtin (embed in data.win).
-    private static int ResolveGroupIDFromContainer(UndertaleData data, ModAddress addr, int builtin)
+    private static int ResolveGroupIdFromContainer(UndertaleData data, ModAddress addr, int builtin)
     {
         string container = addr.Container;
         if (string.IsNullOrEmpty(container) || data.AudioGroups is null || data.AudioGroups.Count == 0)
@@ -200,7 +197,7 @@ public static class SoundImporter
     {
         try
         {
-            SoundJson json = JsonSerializer.Deserialize<SoundJson>(
+            SoundJson? json = JsonSerializer.Deserialize<SoundJson>(
                 File.ReadAllText(file),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (json is null)

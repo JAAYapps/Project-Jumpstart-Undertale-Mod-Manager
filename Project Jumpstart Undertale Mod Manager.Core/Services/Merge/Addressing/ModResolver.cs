@@ -1,6 +1,4 @@
-using System;
 using UndertaleModLib;
-using UndertaleModLib.Models;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 
@@ -31,8 +29,8 @@ public enum ResolutionKind { Replace, Create }
 public sealed record ResolvedAsset(
     ResolutionKind Kind,
     ModAddress Address,
-    object Existing,                 // the live UndertaleData object, or null for Create
-    NewAssetEntry NewEntry);         // the declared-new properties, or null for Replace
+    object? Existing,                 // the live UndertaleData object, or null for Create
+    NewAssetEntry? NewEntry);         // the declared-new properties, or null for Replace
 
 public sealed class ModResolveException : Exception
 {
@@ -58,7 +56,7 @@ public static class ModResolver
         string category = addr.Category.ToString().ToLowerInvariant();
         string name = addr.AssetName;
 
-        object existing = LookupByName(addr.Category, data, name, out bool categorySupported);
+        object? existing = LookupByName(addr.Category, data, name, out bool categorySupported);
 
         if (!categorySupported)
             throw new ModResolveException(
@@ -69,7 +67,7 @@ public static class ModResolver
             // HAS name — but is it the right TYPE? LookupByName only searches the
             // collection for THIS category, so a hit is already the right type.
             // The lie trap is when the SAME name exists in a DIFFERENT collection.
-            string wrongType = FindConflictingType(addr.Category, data, name);
+            string? wrongType = FindConflictingType(addr.Category, data, name);
             // (existing != null means right-type hit; wrongType check is for the
             //  miss branch below. Right-type hit -> Replace.)
             return new ResolvedAsset(ResolutionKind.Replace, addr, existing, null);
@@ -79,10 +77,10 @@ public static class ModResolver
         //  - declared new  -> Create
         //  - not declared  -> error, but give a BETTER message if the name exists
         //                     as a different type (the lie trap).
-        if (manifest.DeclaresNew(category, name, out NewAssetEntry entry))
+        if (manifest.DeclaresNew(category, name, out NewAssetEntry? entry))
             return new ResolvedAsset(ResolutionKind.Create, addr, null, entry);
 
-        string conflicting = FindConflictingType(addr.Category, data, name);
+        string? conflicting = FindConflictingType(addr.Category, data, name);
         if (conflicting is not null)
             throw new ModResolveException(
                 $"'{name}' is addressed as {category} in '{addr.RelativePath}', " +
@@ -96,7 +94,7 @@ public static class ModResolver
 
     // Central category -> collection lookup. categorySupported=false means we
     // haven't wired this category's collection yet (distinct from "not found").
-    private static object LookupByName(
+    private static object? LookupByName(
         AssetCategory category, UndertaleData data, string name, out bool categorySupported)
     {
         categorySupported = true;
@@ -117,7 +115,7 @@ public static class ModResolver
 
     // Does `name` exist in some collection OTHER than the addressed category?
     // Returns the conflicting type's name, or null. Powers the lie-trap message.
-    private static string FindConflictingType(AssetCategory addressed, UndertaleData data, string name)
+    private static string? FindConflictingType(AssetCategory addressed, UndertaleData data, string name)
     {
         if (addressed != AssetCategory.Sprites     && data.Sprites.ByName(name)     is not null) return "sprite";
         if (addressed != AssetCategory.Backgrounds && data.Backgrounds.ByName(name) is not null) return "background";

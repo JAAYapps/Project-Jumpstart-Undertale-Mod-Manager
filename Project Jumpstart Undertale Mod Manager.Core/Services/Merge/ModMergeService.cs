@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Diagnostics.CodeAnalysis;
 using UndertaleModLib;
 using UndertaleModLib.Compiler;
-using UndertaleModLib.Models;
 using System.Text.Json;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
@@ -31,9 +26,9 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         var manifests = new Dictionary<string, ModManifest>();
         foreach (ModSource mod in mods)
         {
-            if (!TryReadManifest(mod, out ModManifest manifest, out string err))
+            if (!TryReadManifest(mod, out ModManifest? manifest, out string? err))
                 return MergeResult.Fail(mod.Name, err);   // broken mod.json -> abort naming it
-            manifests[mod.Name] = manifest;
+            manifests[mod.Name] = manifest; // Shouldn't really happen to be null if try fails and go to Fail state.
         }
 
         // === PHASE 1: dependency check (hard-fail) ==========================
@@ -61,12 +56,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
             {
                 string rel = ToModRelative(mod, file);
-                if (!ModAddressParser.TryParse(rel, out ModAddress addr, out string parseErr))
+                if (!ModAddressParser.TryParse(rel, out ModAddress? addr, out string parseErr))
                     return MergeResult.Fail(mod.Name, $"bad address '{rel}': {parseErr}");
 
                 string key = AssetKey(addr);
 
-                if (plan.TryGetValue(key, out PlannedAsset prev) && prev.OwningMod != mod.Name)
+                if (plan.TryGetValue(key, out PlannedAsset? prev) && prev.OwningMod != mod.Name)
                 {
                     if (!overriddenBy.TryGetValue(key, out var list))
                         overriddenBy[key] = list = new List<string>();
@@ -99,22 +94,16 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         // ---- plan is VALID. Only now do we mutate. ------------------------
         var warnings = new List<string>();
 
-        // === PHASE 5a: code -> CompileGroup ================================
+        // === PHASE 5a: code -> CodeImportGroup ================================
         var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
         if (codeAssets.Count > 0)
         {
-            var group = new CompileGroup(data);
+            var group = new CodeImportGroup(data);
             foreach (PlannedAsset pa in codeAssets)
             {
-                UndertaleCode code = data.Code.ByName(pa.Address.AssetName);
-                if (code is null)
-                {
-                    warnings.Add($"[{pa.OwningMod}] new code '{pa.Address.AssetName}' creation not wired yet; skipped.");
-                    continue;
-                }
-                group.QueueCodeReplace(code, File.ReadAllText(pa.SourceFile));
+                group.QueueReplace(pa.Address.AssetName, File.ReadAllText(pa.SourceFile));
             }
-            CompileResult cr = group.Compile();
+            CompileResult cr = group.Import(false);
             if (!cr.Successful)
                 return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
         }
@@ -158,14 +147,10 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     }
                     break;
                 // NOTE on ordering: EventHandlerFor may CREATE an empty code entry
-                // (gml_Object_<name>_<evt>). If a mod ALSO ships that code file, the code/
-                // importer (PHASE 5a) compiles into it. PHASE 5a currently runs BEFORE 5b, so
-                // on a fresh object the code entry won't exist yet when 5a runs -> the code
-                // gets skipped with a "new code creation not wired yet" warning. For v1 that's
-                // acceptable (object + its code in one mod, code compiles on a REPLACE of an
-                // existing object). Fully supporting "new object + new event code in one pass"
-                // means running object wiring before code compile, or a second compile pass.
-                // Flag for later; not tonight.
+                // (gml_Object_<name>_<evt>). PHASE 5a runs first and uses CodeImportGroup,
+                // which creates missing code entries itself, so a new object's event code
+                // compiles fine even though the object isn't wired until 5b.
+                // Untested.
             }
         }
 
@@ -174,8 +159,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             // Re-scan the owning mod for both files by asset name (the plan
             // collapsed them into one entry, so don't trust a single SourceFile).
             ModSource owner = mods.First(m => m.Name == b.OwningMod);
-            string jsonFile = FindSoundFile(owner, b.Address, ".json");
-            string audioFile = FindSoundFile(owner, b.Address, ".wav", ".ogg", ".mp3");
+            string? jsonFile = FindSoundFile(owner, b.Address, ".json");
+            string? audioFile = FindSoundFile(owner, b.Address, ".wav", ".ogg", ".mp3");
 
             if (jsonFile is null)
             {
@@ -212,12 +197,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 foreach (string file in EnumerateModFiles(owner, manifests[owner.Name]))
                 {
                     string rel = ToModRelative(owner, file);
-                    if (!ModAddressParser.TryParse(rel, out ModAddress a, out _)) continue;
+                    if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
                     if (a.Category  != pa.Address.Category)  continue;
                     if (a.AssetName != pa.Address.AssetName) continue;
                     if (a.Container != pa.Address.Container) continue;
 
-                    string flat = ToFlatTextureName(a);
+                    string? flat = ToFlatTextureName(a);
                     if (flat is null) continue;
                     File.Copy(file, Path.Combine(overridesDir, flat), overwrite: true);
                     anyTexture = true;
@@ -247,12 +232,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
     // Find <assetName>.<ext> for a sound within the owning mod, matching the
     // asset's addressed location (same route/container). Returns null if absent.
-    private static string FindSoundFile(ModSource mod, ModAddress addr, params string[] exts)
+    private static string? FindSoundFile(ModSource mod, ModAddress addr, params string[] exts)
     {
         foreach (string file in EnumerateModFiles(mod))
         {
             string rel = Path.GetRelativePath(mod.ModDirectory, file).Replace('\\', '/');
-            if (!ModAddressParser.TryParse(rel, out ModAddress a, out _)) continue;
+            if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
             if (a.Category != AssetCategory.Sounds) continue;
             if (a.AssetName != addr.AssetName) continue;
             if (a.Container != addr.Container) continue;   // same audiogroup/container
@@ -264,17 +249,11 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
     }
     
     // Pairs a sound's json + audio files (same asset key) for one Apply call.
-    private sealed class SoundBundle
+    private sealed class SoundBundle(ModAddress addr, string owningMod, bool create)
     {
-        public ModAddress Address { get; }
-        public string OwningMod { get; }
-        public bool Create { get; }
-        public string JsonFile { get; set; }
-        public string AudioFile { get; set; }
-        public SoundBundle(ModAddress addr, string owningMod, bool create)
-        {
-            Address = addr; OwningMod = owningMod; Create = create;
-        }
+        public ModAddress Address { get; } = addr;
+        public string OwningMod { get; } = owningMod;
+        public bool Create { get; } = create;
     }
 
     private static string AssetKey(ModAddress a)
@@ -283,7 +262,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         return $"{a.Game}/{a.Container}/{cat}:{a.AssetName}";
     }
 
-    private static string ToFlatTextureName(ModAddress a)
+    private static string? ToFlatTextureName(ModAddress a)
     {
         return a.Category switch
         {
@@ -294,7 +273,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         };
     }
 
-    private static bool TryReadManifest(ModSource mod, out ModManifest manifest, out string error)
+    private static bool TryReadManifest(ModSource mod, [NotNullWhen(true)] out ModManifest? manifest, out string? error)
     {
         manifest = null; error = null;
         string path = Path.Combine(mod.ModDirectory, "mod.json");
@@ -318,7 +297,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
     }
     
-    private static IEnumerable<string> EnumerateModFiles(ModSource mod, ModManifest manifest = null)
+    private static IEnumerable<string> EnumerateModFiles(ModSource mod, ModManifest? manifest = null)
     {
         if (!Directory.Exists(mod.ModDirectory)) yield break;
 
@@ -347,6 +326,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
     private static void TryDelete(string dir)
     {
-        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch { /* ignored, don't care if folder deletion fails, only just a make things neat */ }
     }
 }

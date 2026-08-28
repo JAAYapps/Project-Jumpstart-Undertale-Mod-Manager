@@ -86,7 +86,7 @@ public static class PathImporter
     {
         try
         {
-            PathJson json = JsonSerializer.Deserialize<PathJson>(
+            PathJson? json = JsonSerializer.Deserialize<PathJson>(
                 File.ReadAllText(file),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (json is null)
