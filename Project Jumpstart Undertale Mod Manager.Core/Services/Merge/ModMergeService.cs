@@ -94,23 +94,16 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         // ---- plan is VALID. Only now do we mutate. ------------------------
         var warnings = new List<string>();
 
-        // === PHASE 5a: code -> CodeImportGroup ================================
-        var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
-        if (codeAssets.Count > 0)
-        {
-            var group = new CodeImportGroup(data);
-            foreach (PlannedAsset pa in codeAssets)
-            {
-                group.QueueReplace(pa.Address.AssetName, File.ReadAllText(pa.SourceFile));
-            }
-            CompileResult cr = group.Import(false);
-            if (!cr.Successful)
-                return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
-        }
-
-        // === PHASE 5b: Tier 1 (paths wired; sounds wired; objects stubbed) ==
+        // === PHASE 5a: Tier 1 (paths wired; sounds wired; objects stubbed) ==
         // Sounds are grouped by asset first, because a sound is up to TWO files
         // (<name>.json metadata + <name>.ogg/.wav bytes) sharing one asset key.
+        
+        // NOTE on ordering: assets are created BEFORE code compiles, and it has to
+        // stay that way. GML resolves asset names (sounds, objects, sprites) to
+        // indices at compile time, so an asset the code references must already
+        // exist in `data` or the name compiles as an undefined variable — the game
+        // then dies at runtime with "not set before reading it".
+        
         var soundBundles = new Dictionary<string, SoundBundle>();
 
         foreach (var kv in plan)
@@ -146,11 +139,6 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                         return MergeResult.Fail(pa.OwningMod, $"failed applying object {pa.Address.RelativePath}: {ex.Message}");
                     }
                     break;
-                // NOTE on ordering: EventHandlerFor may CREATE an empty code entry
-                // (gml_Object_<name>_<evt>). PHASE 5a runs first and uses CodeImportGroup,
-                // which creates missing code entries itself, so a new object's event code
-                // compiles fine even though the object isn't wired until 5b.
-                // Untested.
             }
         }
 
@@ -178,6 +166,20 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             }
         }
 
+        // === PHASE 5b: code -> CodeImportGroup ================================
+        var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
+        if (codeAssets.Count > 0)
+        {
+            var group = new CodeImportGroup(data);
+            foreach (PlannedAsset pa in codeAssets)
+            {
+                group.QueueReplace(pa.Address.AssetName, File.ReadAllText(pa.SourceFile));
+            }
+            CompileResult cr = group.Import(false);
+            if (!cr.Successful)
+                return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
+        }
+        
         // === PHASE 5c: textures -> one repack at the end ====================
         string overridesDir = Path.Combine(Path.GetTempPath(), "pjum_merge_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(overridesDir);
