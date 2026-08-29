@@ -32,12 +32,12 @@ public partial class EditDetailsViewModel : DetailsViewModel
         _cancelChange = cancelChange;
         updateArt = false;
         imageArtFileName = imageFileName;
-        sourceArtPath = FullImagePath;
+        sourceArtPath = FullImagePath!;
         Name = name;
         Author = author;
         Version = version;
         Category = category;
-        displayImagePath = FullImagePath;
+        displayImagePath = FullImagePath!;
     }
     
     [RelayCommand]
