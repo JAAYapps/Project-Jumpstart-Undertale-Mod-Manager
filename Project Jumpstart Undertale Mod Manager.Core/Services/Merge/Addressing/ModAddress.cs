@@ -91,8 +91,7 @@ public static class ModAddressParser
             throw new ModAddressFormatException(
                 $"Unknown game '{parts[0]}' in '{relativePath}'. Known: {string.Join(", ", KnownGames)}.");
 
-        // Find the category: first segment after the game that is a known
-        // category keyword. Between game and it is the route; after it, the asset.
+        // Find the category: first segment after the game that is a known category keyword. After that is the asset.
         int categoryIndex = -1;
         AssetCategory category = default;
         for (int i = 1; i < parts.Length; i++)

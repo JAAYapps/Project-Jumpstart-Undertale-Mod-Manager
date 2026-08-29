@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:conv="using:Project_Jumpstart_Undertale_Mod_Manager.Converters"
+             xmlns:vm="using:Project_Jumpstart_Undertale_Mod_Manager.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="Project_Jumpstart_Undertale_Mod_Manager.Views.ViewDetailsView"
+             x:DataType="vm:ViewDetailsViewModel">
+    <!-- Right Sidebar Buttons -->
+    <StackPanel Spacing="5">
+        <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="15"/>
+        
+        <!-- Artwork Preview Box -->
+        <Border BorderBrush="Gray" BorderThickness="1" MinHeight="150" Margin="10,10,10,5" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+            <Image Source="{Binding FullImagePath, Converter={x:Static conv:PathToBitmapConverter.Instance}}" Stretch="Uniform"/>
+        </Border>
+    
+        <Button Content="Edit details" Command="{Binding EditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="10,5,10,5"/>
+    </StackPanel>
+</UserControl>

@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -24,19 +22,19 @@ public partial class GameViewModel : ViewModelBase
 {
     private readonly IStorageProvider _storageProvider;
     
-    private ILauncherService _launcherService;
+    private readonly ILauncherService _launcherService;
     
-    private IModMergeService _mergeService;
+    private readonly IModMergeService _mergeService;
     
     public string GameName => new DirectoryInfo(GameDirectory).Name;
     
-    public ObservableCollection<string> Executables { get; } = new ObservableCollection<string>();
-    public ObservableCollection<string> DataFiles { get; } = new ObservableCollection<string>();
+    public ObservableCollection<string> Executables { get; } = [];
+    public ObservableCollection<string> DataFiles { get; } = [];
     
-    public ObservableCollection<ModItem> Mods { get; } = new ObservableCollection<ModItem>();
+    public ObservableCollection<ModItem> Mods { get; } = [];
 
-    public ObservableCollection<MergeTarget> MergeTargets { get; } = new();
-
+    public ObservableCollection<MergeTarget> MergeTargets { get; } = [];
+    
     [ObservableProperty]
     private MergeTarget? _selectedTarget;
 
@@ -53,8 +51,8 @@ public partial class GameViewModel : ViewModelBase
     public partial string GameDirectory { get; set; }
 
     [ObservableProperty]
-    private ModItem? _selectedMod;
-    
+    public partial ModItem? SelectedMod { get; set; }
+
     public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, string gamePath)
     {
         GameDirectory = gamePath;
@@ -129,45 +127,14 @@ public partial class GameViewModel : ViewModelBase
                 if (mod != null)
                 {
                     mod.ModDirectory = folder;
+                    mod.StorageProvider = _storageProvider;
+                    mod.Init();
                     Mods.Add(mod);
                 }
             }
         }
-    }
-    
-    [RelayCommand]
-    private async Task UploadArtAsync()
-    {
-        if (SelectedMod == null) return;
-
-        var files = await _storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Select Mod Artwork",
-            AllowMultiple = false,
-            FileTypeFilter = new[] { FilePickerFileTypes.ImageAll }
-        });
-
-        if (files.Count > 0)
-        {
-            string sourcePath = files[0].Path.LocalPath;
-            string fileName = Path.GetFileName(sourcePath);
-            string destPath = Path.Combine(SelectedMod.ModDirectory, fileName);
-
-            // Copy the file into the mod folder if it isn't already there
-            if (sourcePath != destPath)
-            {
-                File.Copy(sourcePath, destPath, true);
-            }
-
-            // Update the model with just the file name
-            SelectedMod.ImageFileName = fileName;
-        
-            // Write back to mod.json
-            string jsonPath = Path.Combine(SelectedMod.ModDirectory, "mod.json");
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string jsonString = JsonSerializer.Serialize(SelectedMod, options);
-            File.WriteAllText(jsonPath, jsonString);
-        }
+        if (Mods.Count > 0)
+            SelectedMod = Mods[0];
     }
     
     [RelayCommand]
@@ -191,8 +158,10 @@ public partial class GameViewModel : ViewModelBase
             Author = "Author Name",
             Version = "1.0.0",
             Category = "Misc",
-            ModDirectory = newModDir
+            ModDirectory = newModDir,
+            StorageProvider = _storageProvider
         };
+        newMod.Init();
 
         // Serialize and write the mod.json file to disk
         var options = new JsonSerializerOptions { WriteIndented = true };

@@ -25,9 +25,6 @@ public partial class MainWindowViewModel : ViewModelBase
     
     [ObservableProperty]
     public partial bool ShowLogs { get; set; } = true;
-    
-    [ObservableProperty]
-    public partial RowDefinition LogHeight { get; set; }
 
     public ObservableCollection<GameViewModel> Games { get; } = [];
     
