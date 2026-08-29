@@ -14,6 +14,9 @@ public partial class EditDetailsViewModel : DetailsViewModel
     private string sourceArtPath;
     private string imageArtFileName;
 
+    [ObservableProperty]
+    private string displayImagePath;
+    
     public delegate void UpdateDetails(bool updateArt, string artFileName, string sourceArtPath);
 
     private readonly UpdateDetails _updateDetails;
@@ -34,6 +37,7 @@ public partial class EditDetailsViewModel : DetailsViewModel
         Author = author;
         Version = version;
         Category = category;
+        displayImagePath = FullImagePath;
     }
     
     [RelayCommand]
@@ -53,6 +57,7 @@ public partial class EditDetailsViewModel : DetailsViewModel
                 sourceArtPath = files[0].Path.LocalPath;
                 imageArtFileName = Path.GetFileName(sourceArtPath);
             
+                DisplayImagePath = sourceArtPath;
                 updateArt  = true;
             }
         }
@@ -62,11 +67,14 @@ public partial class EditDetailsViewModel : DetailsViewModel
     private void SaveDetails()
     {
         _updateDetails(updateArt, imageArtFileName, sourceArtPath);
+        sourceArtPath = FullImagePath;
     }
 
     [RelayCommand]
     private void Cancel()
     {
         _cancelChange();
+        sourceArtPath = FullImagePath;
+        DisplayImagePath = FullImagePath;
     }
 }

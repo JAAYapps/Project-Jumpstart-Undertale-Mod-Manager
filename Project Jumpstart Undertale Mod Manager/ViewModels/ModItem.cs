@@ -26,12 +26,8 @@ public partial class ModItem : ObservableObject
     
     [JsonIgnore]
     public string ModDirectory { get; set; } = string.Empty;
-    
-    [JsonIgnore]
-    public string FullImagePath => string.IsNullOrEmpty(ImageFileName) ? string.Empty : Path.Combine(ModDirectory, ImageFileName);
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(FullImagePath))]
     public partial string ImageFileName { get; set; } = string.Empty;
     
     [JsonIgnore]
@@ -67,10 +63,11 @@ public partial class ModItem : ObservableObject
             ImageFileName = artFileName;
         }
         
-        Name  = ModDetails[0].Name = ModDetails[1].Name;
+        Name = ModDetails[0].Name = ModDetails[1].Name;
         Author = ModDetails[0].Author = ModDetails[1].Author;
         Version = ModDetails[0].Version = ModDetails[1].Version;
         Category = ModDetails[0].Category = ModDetails[1].Category;
+        ModDetails[0].FullImagePath = ModDetails[1].FullImagePath = ComputeImagePath();
         
         // Write back to mod.json
         string jsonPath = Path.Combine(ModDirectory, "mod.json");
@@ -93,5 +90,10 @@ public partial class ModItem : ObservableObject
         ModDetails[1].Author = Author;
         ModDetails[1].Version = Version;
         ModDetails[1].Category = Category;
+    }
+
+    public string ComputeImagePath()
+    {
+        return string.IsNullOrEmpty(ImageFileName) ? string.Empty : Path.Combine(ModDirectory, ImageFileName);
     }
 }

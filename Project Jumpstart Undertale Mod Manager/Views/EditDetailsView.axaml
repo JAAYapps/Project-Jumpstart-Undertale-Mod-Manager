@@ -10,7 +10,7 @@
     <StackPanel>
         <!-- Artwork Preview Box -->
         <Border BorderBrush="Gray" BorderThickness="1" MinHeight="150" Margin="10,10,10,5" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
-            <Image Source="{Binding FullImagePath, Converter={x:Static conv:PathToBitmapConverter.Instance}}" Stretch="Uniform"/>
+            <Image Source="{Binding DisplayImagePath, Converter={x:Static conv:PathToBitmapConverter.Instance}}" Stretch="Uniform"/>
         </Border>
         
         <!-- Upload Button -->

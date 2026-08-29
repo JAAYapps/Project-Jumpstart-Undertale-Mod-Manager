@@ -16,6 +16,7 @@ public abstract partial class DetailsViewModel(string name, string author, strin
 
     [ObservableProperty]
     public partial string Category { get; set; } = category;
-    
-    public string FullImagePath => string.IsNullOrEmpty(imageFileName) ? string.Empty : Path.Combine(modDirectory, imageFileName);
+
+    [ObservableProperty]
+    public partial string FullImagePath { get; set; } = string.IsNullOrEmpty(imageFileName) ? string.Empty : Path.Combine(modDirectory, imageFileName);
 }
