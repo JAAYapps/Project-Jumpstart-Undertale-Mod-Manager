@@ -3,6 +3,7 @@ using UndertaleModLib;
 using UndertaleModLib.Compiler;
 using System.Text.Json;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Code;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
@@ -50,7 +51,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         var plan = new Dictionary<string, PlannedAsset>();
         var conflictLog = new List<ConflictLogEntry>();
         var overriddenBy = new Dictionary<string, List<string>>();
-
+        var codeOps = new List<PlannedAsset>();
+        
         foreach (ModSource mod in mods) // load order
         {
             foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
@@ -58,6 +60,13 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 string rel = ToModRelative(mod, file);
                 if (!ModAddressParser.TryParse(rel, out ModAddress? addr, out string parseErr))
                     return MergeResult.Fail(mod.Name, $"bad address '{rel}': {parseErr}");
+
+                // Code is meant to accumulate to combine mods together in code, otherwise one mod will break or disable another programmatically.
+                if (addr.Category == AssetCategory.Code)
+                {
+                    codeOps.Add(new PlannedAsset(addr, mod.Name, file));
+                    continue;
+                }
 
                 string key = AssetKey(addr);
 
@@ -167,13 +176,28 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
 
         // === PHASE 5b: code -> CodeImportGroup ================================
-        var codeAssets = plan.Values.Where(p => p.Address.Category == AssetCategory.Code).ToList();
-        if (codeAssets.Count > 0)
+        if (codeOps.Count > 0)
         {
             var group = new CodeImportGroup(data);
-            foreach (PlannedAsset pa in codeAssets)
+            foreach (PlannedAsset co in codeOps)
             {
-                group.QueueReplace(pa.Address.AssetName, File.ReadAllText(pa.SourceFile));
+                if (CheckIfFileConflict(co))
+                {
+                    return MergeResult.Fail(co.OwningMod,
+                        $"code '{co.Address.AssetName}' has both .gml and .json; use one or the other.");
+                }
+                try
+                {
+                    if (Path.GetExtension(co.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
+                        CodeImporter.Apply(group, co.Address, co.SourceFile);
+                    else
+                        group.QueueReplace(co.Address.AssetName, File.ReadAllText(co.SourceFile));
+                }
+                catch (Exception ex)
+                {
+                    return MergeResult.Fail(co.OwningMod,
+                        $"failed applying code {co.Address.RelativePath}: {ex.Message}");
+                }
             }
             CompileResult cr = group.Import(false);
             if (!cr.Successful)
@@ -248,6 +272,19 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 if (ext == want) return file;
         }
         return null;
+    }
+    
+    private static bool CheckIfFileConflict(PlannedAsset co)
+    {
+        if (co.SourceFile.Contains(".json"))
+        {
+            if (File.Exists(co.SourceFile.Replace(".json", ".gml"))) return true;
+        }
+        else if (co.SourceFile.Contains(".gml"))
+        {
+            if (File.Exists(co.SourceFile.Replace(".gml", ".json"))) return true;
+        }
+        return false;
     }
     
     // Pairs a sound's json + audio files (same asset key) for one Apply call.
