@@ -115,6 +115,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         
         var soundBundles = new Dictionary<string, SoundBundle>();
 
+        var objectlist = new Dictionary<string, (ModAddress address, string owningMod, string sourceFile, bool create)>();
+        
         foreach (var kv in plan)
         {
             PlannedAsset pa = kv.Value;
@@ -126,8 +128,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     try { Paths.PathImporter.Apply(data, pa.Address, pa.SourceFile, create); }
                     catch (Exception ex)
                     {
-                        return MergeResult.Fail(pa.OwningMod,
-                            $"failed applying path {pa.Address.RelativePath}: {ex.Message}");
+                        return MergeResult.Fail(pa.OwningMod, $"failed applying path {pa.Address.RelativePath}: {ex.Message}");
                     }
                     break;
 
@@ -139,14 +140,9 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     break;
 
                 case AssetCategory.Objects:
-                    try
-                    {
-                        Objects.ObjectImporter.Apply(data, pa.Address, pa.SourceFile, create);
-                    }
-                    catch (Exception ex)
-                    {
-                        return MergeResult.Fail(pa.OwningMod, $"failed applying object {pa.Address.RelativePath}: {ex.Message}");
-                    }
+                    // An object requires that it be processed last after the texture repack.
+                    // Objects that rely on sprites will fail to find newly created sprites not originally in game.
+                    objectlist.TryAdd(kv.Key, (pa.Address, pa.OwningMod, pa.SourceFile, create));
                     break;
             }
         }
@@ -174,37 +170,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     $"failed applying sound {b.Address.RelativePath}: {ex.Message}");
             }
         }
-
-        // === PHASE 5b: code -> CodeImportGroup ================================
-        if (codeOps.Count > 0)
-        {
-            var group = new CodeImportGroup(data);
-            foreach (PlannedAsset co in codeOps)
-            {
-                if (CheckIfFileConflict(co))
-                {
-                    return MergeResult.Fail(co.OwningMod,
-                        $"code '{co.Address.AssetName}' has both .gml and .json; use one or the other.");
-                }
-                try
-                {
-                    if (Path.GetExtension(co.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
-                        CodeImporter.Apply(group, co.Address, co.SourceFile);
-                    else
-                        group.QueueReplace(co.Address.AssetName, File.ReadAllText(co.SourceFile));
-                }
-                catch (Exception ex)
-                {
-                    return MergeResult.Fail(co.OwningMod,
-                        $"failed applying code {co.Address.RelativePath}: {ex.Message}");
-                }
-            }
-            CompileResult cr = group.Import(false);
-            if (!cr.Successful)
-                return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
-        }
         
-        // === PHASE 5c: textures -> one repack at the end ====================
+        // === PHASE 5b: textures -> one repack ====================
         string overridesDir = Path.Combine(Path.GetTempPath(), "pjum_merge_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(overridesDir);
         try
@@ -240,7 +207,72 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 RepackResult rr = await _repacker.RepackAsync(data, overridesDir);
                 warnings.AddRange(rr.Warnings);
             }
+        }
+        finally
+        {
+            TryDelete(overridesDir);
+        }
+        
+        // Note: Event connect to gml scripts and if a newly created object ties to connect an event that is missing (gml code script added in code section), may result in an object build failure
+        // Events right now don't currently link to objects, so theory of the build failure isn't confirmed 
+        
+        // === PHASE 5c: objects -> CodeImportGroup ================================
+        foreach (KeyValuePair<string, (ModAddress address, string owningMod, string sourceFile, bool create)> obj in objectlist)
+        {
+            try
+            {
+                Objects.ObjectImporter.Apply(data, obj.Value.address, obj.Value.sourceFile, obj.Value.create);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(obj.Value.owningMod, $"failed applying object {obj.Value.address.RelativePath}: {ex.Message}");
+            }
+        }
+        
+        // === PHASE 5d: code -> CodeImportGroup ================================
+        if (codeOps.Count > 0)
+        {
+            var group = new CodeImportGroup(data);
+            foreach (PlannedAsset co in codeOps)
+            {
+                if (CheckIfFileConflict(co))
+                {
+                    return MergeResult.Fail(co.OwningMod,
+                        $"code '{co.Address.AssetName}' has both .gml and .json; use one or the other.");
+                }
+                try
+                {
+                    if (Path.GetExtension(co.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
+                        CodeImporter.Apply(group, co.Address, co.SourceFile);
+                    else
+                        group.QueueReplace(co.Address.AssetName, File.ReadAllText(co.SourceFile));
+                }
+                catch (Exception ex)
+                {
+                    return MergeResult.Fail(co.OwningMod,
+                        $"failed applying code {co.Address.RelativePath}: {ex.Message}");
+                }
+            }
+            CompileResult cr = group.Import(false);
+            if (!cr.Successful)
+                return MergeResult.Fail("(compile)", "GML compile failed: " + cr.PrintAllErrors(false));
+        }
 
+        // === PHASE 5e: objects phase 2 -> CodeImportGroup at the end ================================
+        foreach (KeyValuePair<string, (ModAddress address, string owningMod, string sourceFile, bool create)> obj in objectlist)
+        {
+            try
+            {
+                Objects.ObjectImporter.Apply(data, obj.Value.address, obj.Value.sourceFile, false);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(obj.Value.owningMod, $"failed applying object {obj.Value.address.RelativePath}: {ex.Message}");
+            }
+        }
+        
+        try
+        {
             // === PHASE 6: write data.win back IN PLACE =====================
             await dataService.SaveAsync(data, dataWinPath);
         }
@@ -248,7 +280,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         {
             TryDelete(overridesDir);
         }
-
+        
         return MergeResult.Ok(conflictLog, warnings);
     }
 
