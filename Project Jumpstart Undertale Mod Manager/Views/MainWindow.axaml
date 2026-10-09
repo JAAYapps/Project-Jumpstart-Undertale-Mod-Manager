@@ -44,7 +44,7 @@
         <Border Grid.Row="2" Padding="10" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button Content="Save &amp; Play" Command="{Binding SaveAndPlayCommand}"/>
-                <Button Content="Save"/>
+                <Button Content="Save" Command="{Binding SaveCommand}"/>
                 <ComboBox ItemsSource="{Binding Games}"
                           SelectedItem="{Binding SelectedGame}">
                     <ComboBox.ItemTemplate>

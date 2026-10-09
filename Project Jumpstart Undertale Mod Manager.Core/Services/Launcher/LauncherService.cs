@@ -7,6 +7,16 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 
 public class LauncherService : ILauncherService
 {
+    public void OpenFolder(string path)
+    {
+        if (!Directory.Exists(path))
+            throw new DirectoryNotFoundException($"Folder not found: {path}");
+
+        // Shell execute hands the folder to the desktop's file manager
+        // (Explorer on Windows, xdg-open on Linux, open on macOS).
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
     public async Task LaunchAndWaitAsync(string gameDir, string exeName, string dataName, Action<string> log, CancellationToken ct = default)
     {
         log($"Launching '{exeName}'...");

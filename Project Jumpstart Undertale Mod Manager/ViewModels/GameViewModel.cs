@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -87,15 +88,71 @@ public partial class GameViewModel : ViewModelBase
     {
         var files = await _storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open Game Data File",
-            AllowMultiple = false
+            Title = "Select a mod (.zip)",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Mod archive") { Patterns = ["*.zip"] }]
         });
 
-        if (files.Count > 0)
+        if (files.Count == 0)
+            return;
+
+        try
         {
-            string filePath = files[0].Path.LocalPath;
-            
-            // TODO: import this mod into the game's /mods folder, then RefreshMods()
+            string newModDir = ImportModZip(files[0].Path.LocalPath, ModsDirectory);
+            MainWindowViewModel.SendLog($"Added mod {Path.GetFileName(newModDir)}");
+            RefreshMods();
+            SelectedMod = Mods.FirstOrDefault(m => m.ModDirectory == newModDir) ?? SelectedMod;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            MainWindowViewModel.SendLog(ex.Message, LogLevel.Error);
+            await (Application.Current?.ShowError(ex.Message, "Could not add mod") ?? Task.FromResult(ButtonResult.Ok));
+        }
+    }
+
+    /// <summary>
+    /// Unpack a mod .zip into its own folder under <paramref name="modsDir"/> and
+    /// return that folder. mod.json may sit at the top of the zip or inside one
+    /// top-level folder; either way the new folder has mod.json directly in it.
+    /// </summary>
+    public static string ImportModZip(string zipPath, string modsDir)
+    {
+        Directory.CreateDirectory(modsDir);
+
+        // Unpack beside the final location so the move below stays on one drive.
+        string staging = Path.Combine(modsDir, ".import_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            ZipFile.ExtractToDirectory(zipPath, staging);
+
+            string modRoot = staging;
+            string modName = Path.GetFileNameWithoutExtension(zipPath);
+            if (!File.Exists(Path.Combine(modRoot, "mod.json")))
+            {
+                string[] folders = Directory.GetDirectories(staging);
+                if (folders.Length == 1 && File.Exists(Path.Combine(folders[0], "mod.json")))
+                {
+                    modRoot = folders[0];
+                    modName = Path.GetFileName(modRoot);
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"'{Path.GetFileName(zipPath)}' is not a mod: no mod.json at the top of the zip or inside its one folder.");
+                }
+            }
+
+            string destination = Path.Combine(modsDir, modName);
+            if (Directory.Exists(destination))
+                throw new InvalidOperationException(
+                    $"A mod folder named '{modName}' already exists. Remove or rename it first.");
+
+            Directory.Move(modRoot, destination);
+            return destination;
+        }
+        finally
+        {
+            TryDeleteDir(staging);
         }
     }
 
@@ -105,7 +162,7 @@ public partial class GameViewModel : ViewModelBase
         Mods.Clear();
     
         // Looks for a "mods" folder inside the Undertale or Deltarune install path
-        string modsDir = Path.Combine(GameDirectory, "mods");
+        string modsDir = ModsDirectory;
 
         if (!Directory.Exists(modsDir))
         {
@@ -115,14 +172,22 @@ public partial class GameViewModel : ViewModelBase
 
         var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-        foreach (string folder in Directory.GetDirectories(modsDir))
+        foreach (string folder in InLoadOrder(Directory.GetDirectories(modsDir), ReadLoadOrder()))
         {
             string jsonPath = Path.Combine(folder, "mod.json");
         
             if (File.Exists(jsonPath))
             {
-                string jsonString = File.ReadAllText(jsonPath);
-                ModItem? mod = JsonSerializer.Deserialize<ModItem>(jsonString, jsonOptions);
+                ModItem? mod;
+                try
+                {
+                    mod = JsonSerializer.Deserialize<ModItem>(File.ReadAllText(jsonPath), jsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    MainWindowViewModel.SendLog($"Skipped {jsonPath}: it is not valid JSON ({ex.Message})", LogLevel.Error);
+                    continue;
+                }
             
                 if (mod != null)
                 {
@@ -135,6 +200,95 @@ public partial class GameViewModel : ViewModelBase
         }
         if (Mods.Count > 0)
             SelectedMod = Mods[0];
+    }
+
+    // Later in the list wins a conflict, so the order is part of the setup.
+    [RelayCommand]
+    private void MoveModUp() => MoveSelectedMod(-1);
+
+    [RelayCommand]
+    private void MoveModDown() => MoveSelectedMod(+1);
+
+    private void MoveSelectedMod(int step)
+    {
+        ModItem? mod = SelectedMod;
+        if (mod is null) return;
+
+        int from = Mods.IndexOf(mod);
+        int to = from + step;
+        if (from < 0 || to < 0 || to >= Mods.Count) return;
+
+        Mods.Move(from, to);
+        SelectedMod = mod;
+    }
+
+    /// <summary>
+    /// Save the mod setup: the load order to mods/load_order.json and each
+    /// mod's enabled checkbox to its mod.json.
+    /// </summary>
+    [RelayCommand]
+    public void SaveMods()
+    {
+        try
+        {
+            Directory.CreateDirectory(ModsDirectory);
+            var order = Mods.Select(m => Path.GetFileName(m.ModDirectory)).ToList();
+            File.WriteAllText(LoadOrderPath, JsonSerializer.Serialize(order, new JsonSerializerOptions { WriteIndented = true }));
+
+            foreach (ModItem mod in Mods)
+                mod.SaveManifest();
+
+            MainWindowViewModel.SendLog($"Saved {Mods.Count} mods for {GameName}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MainWindowViewModel.SendLog($"Could not save mods: {ex.Message}", LogLevel.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenGameFolder()
+    {
+        try
+        {
+            _launcherService.OpenFolder(GameDirectory);
+        }
+        catch (Exception ex)
+        {
+            MainWindowViewModel.SendLog($"Could not open {GameDirectory}: {ex.Message}", LogLevel.Error);
+        }
+    }
+
+    private string ModsDirectory => Path.Combine(GameDirectory, "mods");
+
+    private string LoadOrderPath => Path.Combine(ModsDirectory, "load_order.json");
+
+    // Mod folder names in saved order. Empty when nothing has been saved yet.
+    private List<string> ReadLoadOrder()
+    {
+        try
+        {
+            if (File.Exists(LoadOrderPath))
+                return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(LoadOrderPath)) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or IOException)
+        {
+            MainWindowViewModel.SendLog($"Ignored {LoadOrderPath}: {ex.Message}", LogLevel.Warn);
+        }
+        return [];
+    }
+
+    // Saved folders first, in their saved order; folders the order file does
+    // not know (newly added mods) after them, by name.
+    private static IEnumerable<string> InLoadOrder(string[] folders, List<string> order)
+    {
+        return folders
+            .OrderBy(f =>
+            {
+                int index = order.FindIndex(name => name.Equals(Path.GetFileName(f), StringComparison.OrdinalIgnoreCase));
+                return index < 0 ? int.MaxValue : index;
+            })
+            .ThenBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase);
     }
     
     [RelayCommand]
@@ -180,6 +334,8 @@ public partial class GameViewModel : ViewModelBase
     {
         if (SelectedTarget is null || string.IsNullOrEmpty(SelectedExecutable))
             return;
+
+        SaveMods();
 
         string managerRoot = AppContext.BaseDirectory;
         

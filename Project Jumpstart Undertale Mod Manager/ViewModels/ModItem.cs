@@ -80,7 +80,7 @@ public partial class ModItem : ObservableObject
     // Writes the details this screen owns into mod.json and leaves every other
     // key (newAssets, requires, integrityHash, anything a mod author added)
     // exactly as it was. Serializing this ModItem instead would drop them.
-    private void SaveManifest()
+    public void SaveManifest()
     {
         string jsonPath = Path.Combine(ModDirectory, "mod.json");
         // Case-insensitive so an existing "Name" or "name" is updated in place

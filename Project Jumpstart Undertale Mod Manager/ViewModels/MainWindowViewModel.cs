@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
@@ -19,6 +20,8 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IStorageProvider? _storageProvider = null;
     private readonly IGameLocatorService? _gameLocator = null;
+    private readonly ILauncherService? _launcherService = null;
+    private readonly IModMergeService? _mergeService = null;
 
     [ObservableProperty]
     public partial bool ShowCredits { get; set; } = false;
@@ -37,6 +40,8 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _storageProvider = storageProvider;
         _gameLocator = gameLocator;
+        _launcherService = launcherService;
+        _mergeService = mergeService;
         var games = gameLocator.FindGameInstallations();
         SendLog($"Found {games.Count} game installations");
         foreach (var game in games)
@@ -64,8 +69,22 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             string filePath = files[0].Path.LocalPath;
             _gameLocator?.AddCustomGame(filePath);
+
+            GameViewModel? game = Games.FirstOrDefault(g => g.GameDirectory == filePath);
+            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null)
+            {
+                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, filePath);
+                Games.Add(game);
+            }
+            SelectedGame = game ?? SelectedGame;
             SendLog($"Added game {filePath}");
         }
+    }
+
+    [RelayCommand]
+    private void Save()
+    {
+        SelectedGame?.SaveMods();
     }
     
     [RelayCommand]
