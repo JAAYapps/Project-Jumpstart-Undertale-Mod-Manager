@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Project_Jumpstart_Undertale_Mod_Manager.Models;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
 
@@ -69,13 +72,44 @@ public partial class ModItem : ObservableObject
         Category = ModDetails[0].Category = ModDetails[1].Category;
         ModDetails[0].FullImagePath = ModDetails[1].FullImagePath = ComputeImagePath();
         
-        // Write back to mod.json
-        string jsonPath = Path.Combine(ModDirectory, "mod.json");
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        string jsonString = JsonSerializer.Serialize(this, options);
-        File.WriteAllText(jsonPath, jsonString);
+        SaveManifest();
         
         SelectModDetails = ModDetails[0];
+    }
+
+    // Writes the details this screen owns into mod.json and leaves every other
+    // key (newAssets, requires, integrityHash, anything a mod author added)
+    // exactly as it was. Serializing this ModItem instead would drop them.
+    private void SaveManifest()
+    {
+        string jsonPath = Path.Combine(ModDirectory, "mod.json");
+        // Case-insensitive so an existing "Name" or "name" is updated in place
+        // rather than getting a second key beside it.
+        var nodeOptions = new JsonNodeOptions { PropertyNameCaseInsensitive = true };
+
+        JsonObject manifest;
+        try
+        {
+            manifest = File.Exists(jsonPath)
+                ? JsonNode.Parse(File.ReadAllText(jsonPath), nodeOptions) as JsonObject ?? new JsonObject(nodeOptions)
+                : new JsonObject(nodeOptions);
+        }
+        catch (JsonException ex)
+        {
+            MainWindowViewModel.SendLog($"Did not save {jsonPath}: it is not valid JSON ({ex.Message})", LogLevel.Error);
+            return;
+        }
+
+        manifest["isEnabled"] = IsEnabled;
+        manifest["name"] = Name;
+        manifest["author"] = Author;
+        manifest["version"] = Version;
+        manifest["category"] = Category;
+        manifest["imageFileName"] = ImageFileName;
+
+        // Relaxed escaping keeps ">=1.0.0" readable instead of "\u003E=1.0.0".
+        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        File.WriteAllText(jsonPath, manifest.ToJsonString(options));
     }
 
     private void EditDetails()
