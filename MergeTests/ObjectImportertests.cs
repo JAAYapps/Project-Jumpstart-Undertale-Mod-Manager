@@ -73,6 +73,8 @@ public class ObjectImporterTests
         string mod = Path.Combine(root, "ObjMod");
         string gameDir = PrepareGameDir(src);
         const string objName = "obj_pjum_test";
+        const string createCode = "gml_Object_" + objName + "_Create_0";
+        string other = probe.GameObjects[0].Name.Content;
 
         try
         {
@@ -87,7 +89,15 @@ public class ObjectImporterTests
                 "{ \"sprite\": \"" + sprite + "\", \"visible\": true, \"solid\": true, " +
                 "\"depth\": -5, \"persistent\": false, " +
                 "\"physics\": { \"uses\": true, \"shape\": \"Box\", \"density\": 0.75, \"friction\": 0.3 }, " +
-                "\"events\": [ { \"type\": \"Create\" }, { \"type\": \"Step\", \"subtype\": 0 } ] }");
+                "\"events\": [ { \"type\": \"Create\" }, { \"type\": \"Step\", \"subtype\": 0 }, " +
+                "{ \"type\": \"Step\", \"subtype\": \"EndStep\" }, " +
+                "{ \"type\": \"Collision\", \"subtype\": \"" + other + "\" } ] }");
+
+            // GML for the Create event, to prove the code/ importer fills the
+            // entry the object importer wired.
+            string codeDir = Path.Combine(mod, "undertale", "data.win", "code");
+            Directory.CreateDirectory(codeDir);
+            File.WriteAllText(Path.Combine(codeDir, createCode + ".gml"), "pjum_test_value = 1;\n");
 
             var svc = new ModMergeService(new DirectDataService());
             MergeResult result = await svc.ApplyAsync(gameDir, new List<ModSource> { new("ObjMod", mod) });
@@ -110,6 +120,21 @@ public class ObjectImporterTests
             // Events wired: Create (type 0) and Step (type 3) sublists non-empty.
             Assert.NotEmpty(o.Events[(int)EventType.Create]);
             Assert.NotEmpty(o.Events[(int)EventType.Step]);
+
+            // Create runs the compiled GML through a standard code action.
+            UndertaleGameObject.EventAction create = Assert.Single(Assert.Single(o.Events[(int)EventType.Create]).Actions);
+            Assert.Equal(createCode, create.CodeId?.Name?.Content);
+            Assert.NotEmpty(create.CodeId!.Instructions);
+            Assert.Equal(2u, create.ExeType);
+            Assert.Equal(-1, create.Who);
+            Assert.True(create.UseApplyTo);
+
+            // Named subtypes: EndStep, and a collision addressed by object name.
+            Assert.Contains(o.Events[(int)EventType.Step],
+                e => e.EventSubtype == (uint)EventSubtypeStep.EndStep && e.Actions[0].CodeId is not null);
+            UndertaleGameObject.Event collision = Assert.Single(o.Events[(int)EventType.Collision]);
+            Assert.Equal(other, after.GameObjects[(int)collision.EventSubtype].Name.Content);
+            Assert.NotNull(collision.Actions[0].CodeId);
         }
         finally
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UndertaleModLib;
@@ -13,13 +14,12 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Objects;
 // TIER 1: game objects. Declarative properties + event WIRING. Verified against
 // UndertaleGameObject.cs.
 //
-// KEY: the model already does the hard graph wiring. UndertaleGameObject
-// .EventHandlerFor(EventType, uint subtype, data) finds-or-creates the event,
-// the action, and an empty UndertaleCode named gml_Object_<obj>_<type>_<subtype>,
-// and returns that code. So this importer never builds the
-// UndertalePointerList<UndertalePointerList<Event>> by hand — it just declares
-// which events exist and lets EventHandlerFor wire them. The event's GML flows
-// through the normal code/ importer (Tier 2 compiles gml_Object_<obj>_<evt>.gml).
+// KEY: ParseEvents finds-or-creates each declared event, its code action, and
+// an empty UndertaleCode named gml_Object_<obj>_<type>_<subtype>. It does this
+// itself rather than through UndertaleGameObject.EventHandlerFor, which leaves
+// the action's fields zeroed and can't name a 2.3+ collision entry. The event's
+// GML flows through the normal code/ importer (Tier 2 compiles
+// gml_Object_<obj>_<evt>.gml).
 //
 // So objects handle: sprite/parent/mask references (by name), the common
 // properties, the full physics block, and event PRESENCE. Behavior = code path.
@@ -28,7 +28,8 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Objects;
 //   {
 //     "sprite": "spr_x", "parent": "obj_y", "maskSprite": "spr_x",
 //     "visible": true, "solid": false, "persistent": false, "depth": 0,
-//     "events": [ { "type": "Step", "subtype": 0 }, { "type": "Create" } ],
+//     "events": [ { "type": "Create" }, { "type": "Step", "subtype": "EndStep" },
+//                 { "type": "Collision", "subtype": "obj_other" } ],
 //     "physics": { "uses": false, "sensor": false, "shape": "Circle",
 //                  "density": 0.5, "restitution": 0.1, "group": 0,
 //                  "linearDamping": 0.1, "angularDamping": 0.1,
@@ -57,7 +58,8 @@ public sealed class ObjectJson
 public sealed class ObjectEventJson
 {
     [JsonPropertyName("type")]    public string? Type { get; set; }     // "Create", "Step", "Collision", ...
-    [JsonPropertyName("subtype")] public uint Subtype { get; set; }    // 0 for Create/Destroy; varies otherwise
+    [JsonPropertyName("subtype")] public JsonElement Subtype { get; set; } // omitted = 0; a number, or a name ("EndStep", "obj_other")
+    [JsonPropertyName("code")]    public string? Code { get; set; }     // code entry to run; default gml_Object_<obj>_<type>_<subtype>
 }
 
 public sealed class PhysicsJson
@@ -128,14 +130,10 @@ public static class ObjectImporter
         }
 
         // --- event WIRING (behavior comes via the code/ importer) ---
-        // EventHandlerFor creates the event/action and an empty code entry
+        // ParseEvents creates the event/action and an empty code entry
         // (gml_Object_<name>_<type>_<subtype>) if absent. The code/ importer
         // then compiles the GML into that code entry. We only ensure presence.
-        foreach (ObjectEventJson ev in json.Events)
-        {
-            EventType type = ParseEventType(ev.Type, name);
-            obj.EventHandlerFor(type, ev.Subtype, data);
-        }
+        ParseEvents(data, obj, json.Events);
     }
 
     private static UndertaleSprite ResolveSprite(UndertaleData data, string sprite, string obj, string field)
@@ -152,6 +150,131 @@ public static class ObjectImporter
             _ => throw new InvalidOperationException(
                 $"Object '{obj}' has unknown collision shape '{shape}' (Circle|Box|Custom).")
         };
+    }
+
+    // Wires the events declared in JSON onto the object: finds or creates each
+    // event and its single code action, then makes sure the action points at a
+    // code entry. Idempotent on purpose — the merge applies objects both before
+    // the code compile (so the entries exist for the code/ importer to fill, and
+    // collision events never hit CodeImportGroup's "attach manually" throw) and
+    // after it (so anything the compile rerouted is still wired).
+    private static void ParseEvents(UndertaleData data, UndertaleGameObject obj, List<ObjectEventJson> events)
+    {
+        string name = obj.Name.Content;
+
+        foreach (ObjectEventJson ev in events)
+        {
+            EventType type = ParseEventType(ev.Type, name);
+            if ((int)type >= obj.Events.Count)
+                throw new InvalidOperationException(
+                    $"Object '{name}' event type '{type}' is not supported by this game's GameMaker version.");
+
+            uint subtype = ParseEventSubtype(data, type, ev.Subtype, name);
+
+            UndertalePointerList<UndertaleGameObject.Event> subEvents = obj.Events[(int)type];
+            UndertaleGameObject.Event? target = subEvents.FirstOrDefault(e => e.EventSubtype == subtype);
+            if (target is null)
+                subEvents.Add(target = new UndertaleGameObject.Event { EventSubtype = subtype });
+
+            UndertaleGameObject.EventAction? action = target.Actions.FirstOrDefault();
+            if (action is null)
+            {
+                // The values every compiled "execute code" action carries. A bare
+                // new EventAction() leaves them all zero.
+                action = new UndertaleGameObject.EventAction
+                {
+                    LibID = 1,
+                    ID = 603,
+                    Kind = 7,
+                    UseRelative = false,
+                    IsQuestion = false,
+                    UseApplyTo = true,
+                    ExeType = 2,
+                    ActionName = data.Strings.MakeString(""),
+                    ArgumentCount = 1,
+                    Who = -1,
+                    Relative = false,
+                    IsNot = false
+                };
+                target.Actions.Add(action);
+            }
+
+            // An explicit "code" always wins. Otherwise an event that is already
+            // wired (a vanilla object being modified) keeps its own entry.
+            if (ev.Code is not null)
+            {
+                if (action.CodeId?.Name?.Content != ev.Code)
+                    action.CodeId = FindOrCreateCode(data, ev.Code);
+            }
+            else if (action.CodeId is null)
+            {
+                action.CodeId = FindOrCreateCode(data, DefaultCodeName(data, name, type, subtype));
+            }
+        }
+    }
+
+    private static UndertaleCode FindOrCreateCode(UndertaleData data, string codeName)
+        => data.Code.ByName(codeName) ?? UndertaleCode.CreateEmptyEntry(data, codeName);
+
+    // gml_Object_<obj>_<type>_<subtype>, the name the code/ importer looks up.
+    // GM 2.3+ names a collision event after the other object rather than its index.
+    private static string DefaultCodeName(UndertaleData data, string obj, EventType type, uint subtype)
+    {
+        if (type == EventType.Collision && data.IsVersionAtLeast(2, 3)
+            && subtype < data.GameObjects.Count
+            && data.GameObjects[(int)subtype]?.Name?.Content is string other)
+            return $"gml_Object_{obj}_Collision_{other}";
+
+        return $"gml_Object_{obj}_{type}_{subtype}";
+    }
+
+    // "subtype" may be omitted (0), a number, or a name: the other object's name
+    // for Collision, otherwise the event's own subtype enum (BeginStep, DrawGUI,
+    // vk_space, User0, ...).
+    private static uint ParseEventSubtype(UndertaleData data, EventType type, JsonElement raw, string obj)
+    {
+        switch (raw.ValueKind)
+        {
+            case JsonValueKind.Undefined:
+            case JsonValueKind.Null:
+                return 0;
+            case JsonValueKind.Number when raw.TryGetUInt32(out uint n):
+                return n;
+            case JsonValueKind.String:
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Object '{obj}' {type} event subtype must be a number or a name (got {raw.GetRawText()}).");
+        }
+
+        string text = raw.GetString()!;
+        if (uint.TryParse(text, out uint numeric))
+            return numeric;
+
+        if (type == EventType.Collision)
+        {
+            UndertaleGameObject other = data.GameObjects.ByName(text)
+                ?? throw new InvalidOperationException(
+                    $"Object '{obj}' collision event target '{text}' not found.");
+            return (uint)data.GameObjects.IndexOf(other);
+        }
+
+        Type? names = type switch
+        {
+            EventType.Step => typeof(EventSubtypeStep),
+            EventType.Keyboard or EventType.KeyPress or EventType.KeyRelease => typeof(EventSubtypeKey),
+            EventType.Mouse => typeof(EventSubtypeMouse),
+            EventType.Other => typeof(EventSubtypeOther),
+            EventType.Draw => typeof(EventSubtypeDraw),
+            EventType.Gesture => typeof(EventSubtypeGesture),
+            _ => null
+        };
+        if (names is not null && Enum.TryParse(names, text, ignoreCase: true, out object? value))
+            return (uint)value;
+
+        throw new InvalidOperationException(
+            $"Object '{obj}' has unknown {type} event subtype '{text}'" +
+            (names is null ? " (this event type takes a number)." : $". Valid: {string.Join(", ", Enum.GetNames(names))}."));
     }
 
     private static EventType ParseEventType(string? type, string obj)
