@@ -43,14 +43,20 @@ dotnet run --project "Project Jumpstart Undertale Mod Manager/Project Jumpstart 
 
 ## Status
 
-What works: sprites, sounds, code, and (objects not tested but passes the Unit tests and merge tests), texture merging, Steam game detection, launch. What's in progress: project-system GUI, etc.
+What works: sprites, sounds, code, and objects, texture merging, Steam game detection, launch. What's in progress: project-system GUI, etc.
 
 ## Credits
 
 Built on [UndertaleModTool](https://github.com/UnderminersTeam/UndertaleModTool) by the Underminers team.
 
-PJUM by Joshua Vanderzee.
+PJUM designed and built by Joshua Vanderzee. Parts of the UI wiring were
+written with AI assistance (Claude) to save time; the design and the
+merge engine are mine, and every change is reviewed by me.
 
 ## License
 
 Using the GPLv3
+
+## Note on use of AI
+
+To be clear, I do not want AI writing any of the core architecture or design. I am more lenient with the UI, since that is only how something looks, but I am very picky about how it should look, and most of the time I do it myself. AI guesses wrong and frustrates me a lot, so I only use it for fixes and simple things.
