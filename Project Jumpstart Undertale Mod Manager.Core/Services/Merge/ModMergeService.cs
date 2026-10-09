@@ -47,6 +47,15 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         // === PHASE 2: load the game's data.win ONCE =========================
         UndertaleData data = await dataService.LoadAsync(dataWinPath);
 
+        // === PHASE 2b: which game + chapter is this data.win? ===============
+        // Read from the data itself. A mod file addressed to another game or
+        // chapter is SKIPPED, not failed — one mod may cover several chapters.
+        var warnings = new List<string>();
+        ModTarget? target = ModTarget.FromData(data);
+        if (target is null)
+            warnings.Add($"data.win identifies as '{data.GeneralInfo?.Name?.Content}', not Undertale or Deltarune; " +
+                         "mod paths were not checked against the game.");
+
         // === PHASE 3: gather + parse every address, build the last-wins plan =
         var plan = new Dictionary<string, PlannedAsset>();
         var conflictLog = new List<ConflictLogEntry>();
@@ -55,11 +64,22 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         
         foreach (ModSource mod in mods) // load order
         {
+            int accepted = 0;
+            var misspelled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
             {
                 string rel = ToModRelative(mod, file);
                 if (!ModAddressParser.TryParse(rel, out ModAddress? addr, out string parseErr))
                     return MergeResult.Fail(mod.Name, $"bad address '{rel}': {parseErr}");
+
+                if (target is not null && !target.Accepts(addr))
+                {
+                    if (target.LooksMisspelled(addr))
+                        misspelled.Add(string.Join("/", addr.RoutePrefix));
+                    continue;
+                }
+                accepted++;
 
                 // Code is meant to accumulate to combine mods together in code, otherwise one mod will break or disable another programmatically.
                 if (addr.Category == AssetCategory.Code)
@@ -79,6 +99,14 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
                 plan[key] = new PlannedAsset(addr, mod.Name, file);
             }
+
+            foreach (string folder in misspelled)
+                warnings.Add($"[{mod.Name}] folder '{target!.Game}/{folder}' is not a chapter name " +
+                             "(expected nothing, or chapter + a number such as chapter2); its files were skipped.");
+            if (accepted == 0)
+                warnings.Add(target is null
+                    ? $"[{mod.Name}] has no files; skipped."
+                    : $"[{mod.Name}] has no files for {target}; skipped.");
         }
 
         foreach (var kv in overriddenBy)
@@ -101,7 +129,6 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
 
         // ---- plan is VALID. Only now do we mutate. ------------------------
-        var warnings = new List<string>();
 
         // === PHASE 5a: Tier 1 (paths wired; sounds wired; objects stubbed) ==
         // Sounds are grouped by asset first, because a sound is up to TWO files
@@ -152,8 +179,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             // Re-scan the owning mod for both files by asset name (the plan
             // collapsed them into one entry, so don't trust a single SourceFile).
             ModSource owner = mods.First(m => m.Name == b.OwningMod);
-            string? jsonFile = FindSoundFile(owner, b.Address, ".json");
-            string? audioFile = FindSoundFile(owner, b.Address, ".wav", ".ogg", ".mp3");
+            string? jsonFile = FindSoundFile(owner, b.Address, target, ".json");
+            string? audioFile = FindSoundFile(owner, b.Address, target, ".wav", ".ogg", ".mp3");
 
             if (jsonFile is null)
             {
@@ -191,6 +218,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 {
                     string rel = ToModRelative(owner, file);
                     if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
+                    if (target is not null && !target.Accepts(a)) continue;   // same name in another chapter
                     if (a.Category  != pa.Address.Category)  continue;
                     if (a.AssetName != pa.Address.AssetName) continue;
                     if (a.Container != pa.Address.Container) continue;
@@ -290,12 +318,13 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
     // Find <assetName>.<ext> for a sound within the owning mod, matching the
     // asset's addressed location (same route/container). Returns null if absent.
-    private static string? FindSoundFile(ModSource mod, ModAddress addr, params string[] exts)
+    private static string? FindSoundFile(ModSource mod, ModAddress addr, ModTarget? target, params string[] exts)
     {
         foreach (string file in EnumerateModFiles(mod))
         {
             string rel = Path.GetRelativePath(mod.ModDirectory, file).Replace('\\', '/');
             if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
+            if (target is not null && !target.Accepts(a)) continue;   // same name in another chapter
             if (a.Category != AssetCategory.Sounds) continue;
             if (a.AssetName != addr.AssetName) continue;
             if (a.Container != addr.Container) continue;   // same audiogroup/container

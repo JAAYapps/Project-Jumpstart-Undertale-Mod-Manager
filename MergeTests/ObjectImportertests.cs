@@ -83,7 +83,7 @@ public class ObjectImporterTests
                 "{ \"name\": \"ObjMod\", \"version\": \"1.0.0\", " +
                 "\"newAssets\": { \"objects\": { \"" + objName + "\": {} } } }");
 
-            string objDir = Path.Combine(mod, "undertale", "data.win", "objects");
+            string objDir = Path.Combine(TestPaths.ModRoot(mod, probe), "objects");
             Directory.CreateDirectory(objDir);
             File.WriteAllText(Path.Combine(objDir, objName + ".json"),
                 "{ \"sprite\": \"" + sprite + "\", \"visible\": true, \"solid\": true, " +
@@ -95,7 +95,7 @@ public class ObjectImporterTests
 
             // GML for the Create event, to prove the code/ importer fills the
             // entry the object importer wired.
-            string codeDir = Path.Combine(mod, "undertale", "data.win", "code");
+            string codeDir = Path.Combine(TestPaths.ModRoot(mod, probe), "code");
             Directory.CreateDirectory(codeDir);
             File.WriteAllText(Path.Combine(codeDir, createCode + ".gml"), "pjum_test_value = 1;\n");
 

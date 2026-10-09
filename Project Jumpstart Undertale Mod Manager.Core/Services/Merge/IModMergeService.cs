@@ -7,6 +7,10 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 //     later mod in load order wins. Logged, not failed.
 //   * DEPENDENCIES hard-fail. A mod's mod.json "requires" another mod that
 //     isn't in the set -> that mod cannot apply -> abort the run naming it.
+//   * TARGET-MATCH. The data.win says which game and chapter it is. A mod
+//     file addressed to a different game or chapter is skipped, not failed,
+//     so one mod can cover several chapters. A mod with nothing for this
+//     target gets a warning.
 //   * VALIDATE-THEN-APPLY. The whole plan (parse + requires + resolve every
 //     address) is checked BEFORE any mutation. If it can't succeed, we abort
 //     having touched nothing and return WHICH mod failed and WHY.

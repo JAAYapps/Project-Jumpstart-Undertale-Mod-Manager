@@ -61,7 +61,7 @@ public class PathImporterTests
                 "{ \"name\": \"PathMod\", \"version\": \"1.0.0\", " +
                 "\"newAssets\": { \"paths\": { \"" + pathName + "\": {} } } }");
 
-            string pathsDir = Path.Combine(mod, "undertale", "data.win", "paths");
+            string pathsDir = Path.Combine(TestPaths.ModRoot(mod, src), "paths");
             Directory.CreateDirectory(pathsDir);
             File.WriteAllText(Path.Combine(pathsDir, pathName + ".json"),
                 "{ \"smooth\": false, \"closed\": true, \"precision\": 4, " +

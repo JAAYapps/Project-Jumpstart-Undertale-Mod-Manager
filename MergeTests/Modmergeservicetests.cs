@@ -56,7 +56,7 @@ public class ModMergeServiceTests
         File.WriteAllText(Path.Combine(dir, "mod.json"),
             $"{{ \"name\": \"{modName}\", \"version\": \"1.0.0\" }}");
 
-        string frameDir = Path.Combine(dir, "undertale", "data.win", "sprites", sprite);
+        string frameDir = Path.Combine(TestPaths.ModRoot(dir, data), "sprites", sprite);
         Directory.CreateDirectory(frameDir);
 
         string framePath = Path.Combine(frameDir, "0.png");

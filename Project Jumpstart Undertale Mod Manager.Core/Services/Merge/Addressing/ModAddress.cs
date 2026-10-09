@@ -72,6 +72,8 @@ public static class ModAddressParser
 {
     private static readonly string[] KnownGames = { "undertale", "deltarune" };
 
+    public static bool IsKnownGame(string game) => KnownGames.Contains(game);
+
     public static ModAddress Parse(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))

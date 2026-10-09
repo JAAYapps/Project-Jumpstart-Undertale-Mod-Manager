@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.SteamScanner;
+using UndertaleModLib;
 
 namespace MergeTests;
 
@@ -25,6 +27,23 @@ public static class TestPaths
             string? chapterWin = Discover("DELTARUNE", Path.Combine("chapter1_windows", "data.win"));
             return chapterWin is null ? null : Path.GetDirectoryName(chapterWin);
         }
+    }
+
+    // The folder a test mod's assets go under so they are addressed to the
+    // data they will be merged into: <modDir>/<game>/[<chapter>/]<container>.
+    // The merge skips files addressed to any other game or chapter.
+    public static string ModRoot(string modDir, UndertaleData data, string container = "data.win")
+    {
+        ModTarget target = ModTarget.FromData(data) ?? new ModTarget("undertale", null);
+        return target.Chapter is null
+            ? Path.Combine(modDir, target.Game, container)
+            : Path.Combine(modDir, target.Game, target.Chapter, container);
+    }
+
+    public static string ModRoot(string modDir, string dataWinPath, string container = "data.win")
+    {
+        using var fs = new FileStream(dataWinPath, FileMode.Open, FileAccess.Read);
+        return ModRoot(modDir, UndertaleIO.Read(fs), container);
     }
 
     private static string? FromEnv(string key)

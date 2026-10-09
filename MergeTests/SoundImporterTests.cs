@@ -209,7 +209,7 @@ public class SoundImporterTests
         File.WriteAllText(Path.Combine(mod, "mod.json"),
             "{ \"name\": \"GrpMod\", \"version\": \"1.0.0\", " +
             "\"newAssets\": { \"sounds\": { \"snd_pjum_grouped\": {} } } }");
-        string sdir = Path.Combine(mod, "deltarune", "chapter2", groupName, "sounds");
+        string sdir = Path.Combine(TestPaths.ModRoot(mod, probe, groupName), "sounds");
         Directory.CreateDirectory(sdir);
         File.WriteAllText(Path.Combine(sdir, "snd_pjum_grouped.json"),
             "{ \"type\": \".wav\", \"embedded\": true }");

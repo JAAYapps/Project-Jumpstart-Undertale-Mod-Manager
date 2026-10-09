@@ -96,7 +96,7 @@ public class MultiFrameSpriteTests
         try
         {
             // Write one solid, distinct-colored frame per index.
-            string frameDir = Path.Combine(mod, "undertale", "data.win", "sprites", sprite);
+            string frameDir = Path.Combine(TestPaths.ModRoot(mod, baseData), "sprites", sprite);
             Directory.CreateDirectory(frameDir);
             File.WriteAllText(Path.Combine(mod, "mod.json"),
                 "{ \"name\": \"MultiFrameMod\", \"version\": \"1.0.0\" }");
