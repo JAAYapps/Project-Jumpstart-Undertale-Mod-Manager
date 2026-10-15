@@ -128,6 +128,25 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             }
         }
 
+        HashSet<string> mergeWrittenFiles = MergeWrittenFiles(data);
+        string gameRoot = Path.GetFullPath(gameDir);
+        foreach (PlannedAsset pa in plan.Values)
+        {
+            if (pa.Address.Category != AssetCategory.Files) continue;
+
+            string rel = pa.Address.AssetName;
+            if (mergeWrittenFiles.Contains(rel))
+                return MergeResult.Fail(pa.OwningMod,
+                    $"files/{rel} would replace {rel}, which the merge itself rewrites. Remove it from files/.");
+
+            string dest = Path.GetFullPath(Path.Combine(gameRoot, rel));
+            if (!dest.StartsWith(gameRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                return MergeResult.Fail(pa.OwningMod, $"files/{rel} points outside the game folder.");
+
+            if (ProgramExtensions.Contains(Path.GetExtension(rel)))
+                warnings.Add($"[{pa.OwningMod}] files/{rel} is a program file; it was copied into the game folder.");
+        }
+
         // ---- plan is VALID. Only now do we mutate. ------------------------
 
         // === PHASE 5a: Tier 1 (paths wired; sounds wired; objects stubbed) ==
@@ -309,12 +328,50 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             TryDelete(overridesDir);
         }
         
+        foreach (PlannedAsset pa in plan.Values)
+        {
+            if (pa.Address.Category != AssetCategory.Files) continue;
+
+            string rel = pa.Address.AssetName;
+            if (!rel.Contains('/') && soundBundles.Values.Any(b => b.Address.AssetName.Equals(Path.GetFileNameWithoutExtension(rel), StringComparison.OrdinalIgnoreCase)))
+                warnings.Add($"[{pa.OwningMod}] files/{rel} has the same name as a merged sound; the files/ copy was applied last.");
+
+            string dest = Path.GetFullPath(Path.Combine(gameRoot, rel));
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.Copy(pa.SourceFile, dest, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(pa.OwningMod, $"failed copying files/{rel}: {ex.Message}");
+            }
+        }
+
         return MergeResult.Ok(conflictLog, warnings);
     }
 
     // -- helpers ------------------------------------------------------------
 
     private sealed record PlannedAsset(ModAddress Address, string OwningMod, string SourceFile);
+
+    private static readonly HashSet<string> ProgramExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".exe", ".dll", ".so", ".dylib" };
+
+    private static HashSet<string> MergeWrittenFiles(UndertaleData data)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "data.win" };
+        if (data.AudioGroups is null) return names;
+
+        for (int i = 0; i < data.AudioGroups.Count; i++)
+        {
+            names.Add($"audiogroup{i}.dat");
+            string? custom = data.AudioGroups[i]?.Path?.Content;
+            if (!string.IsNullOrEmpty(custom))
+                names.Add(custom.Replace('\\', '/'));
+        }
+        return names;
+    }
 
     // Find <assetName>.<ext> for a sound within the owning mod, matching the
     // asset's addressed location (same route/container). Returns null if absent.
