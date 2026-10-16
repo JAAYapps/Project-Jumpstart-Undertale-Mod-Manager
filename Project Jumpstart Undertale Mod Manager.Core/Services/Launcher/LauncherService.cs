@@ -17,6 +17,29 @@ public class LauncherService : ILauncherService
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
+    public IReadOnlyList<string> FindSpaceCutFiles(string exePath)
+    {
+        var found = new List<string>();
+        string full = Path.GetFullPath(exePath);
+        for (int space = full.IndexOf(' '); space >= 0; space = full.IndexOf(' ', space + 1))
+        {
+            string cut = full[..space];
+            string? folder = Path.GetDirectoryName(cut);
+            string name = Path.GetFileName(cut);
+            if (folder is null || name.Length == 0 || !Directory.Exists(folder))
+                continue;
+
+            foreach (string file in Directory.EnumerateFiles(folder))
+            {
+                string fileName = Path.GetFileName(file);
+                if (fileName.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                    fileName.Equals(name + ".exe", StringComparison.OrdinalIgnoreCase))
+                    found.Add(file);
+            }
+        }
+        return found;
+    }
+
     public async Task LaunchAndWaitAsync(string gameDir, string exeName, string dataName, Action<string> log, LaunchOptions? options = null, CancellationToken ct = default)
     {
         log($"Launching '{exeName}'...");

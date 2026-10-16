@@ -453,6 +453,19 @@ public partial class GameViewModel : ViewModelBase
                     "Merge completed with warnings") ?? Task.FromResult(ButtonResult.Ok));
             }
 
+            IReadOnlyList<string> cutFiles = SelectedExecutable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                ? _launcherService.FindSpaceCutFiles(Path.Combine(tempGameDir, SelectedExecutable))
+                : [];
+            if (cutFiles.Count > 0)
+            {
+                string message = $"These files sit where the path to the game has a space:\n\n{string.Join("\n", cutFiles)}\n\n" +
+                                 "When the game starts another copy of itself (Deltarune does this for every chapter), " +
+                                 "Windows and Wine can try to run one of these files instead, and the chapter fails with error 0xc1. " +
+                                 "Move or delete them, or move the mod manager to a folder without spaces.";
+                MainWindowViewModel.SendLog(message, LogLevel.Warn);
+                await (Application.Current?.ShowWarning(message, "A file may stop chapters from starting") ?? Task.FromResult(ButtonResult.Ok));
+            }
+
             // Launch and wait for the process.
             await _launcherService.LaunchAndWaitAsync(tempGameDir, SelectedExecutable, "data.win", MainWindowViewModel.SendLog, BuildLaunchOptions());
         }
