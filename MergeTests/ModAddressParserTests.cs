@@ -79,7 +79,6 @@ public class ModAddressParserTests
     [Theory]
     [InlineData("")]                                                // empty
     [InlineData("undertale/data.win/sprites")]                      // too few segments
-    [InlineData("mario64/data.win/sprites/spr_x/0.png")]            // unknown game
     [InlineData("undertale/data.win/sprts/spr_x/0.png")]            // no known category anywhere
     [InlineData("undertale/data.win/sprites/spr_x/notaframe.png")]  // non-integer frame
     [InlineData("undertale/sprites/spr_x/0.png")]                   // missing route (category right after game)
@@ -88,6 +87,15 @@ public class ModAddressParserTests
     public void Malformed_paths_throw(string bad)
     {
         Assert.Throws<ModAddressFormatException>(() => ModAddressParser.Parse(bad));
+    }
+
+    [Theory]
+    [InlineData("undertale_yellow/data.win/sprites/spr_x/0.png", "undertale_yellow")]
+    [InlineData("Undertale_Yellow/data.win/sprites/spr_x/0.png", "undertale_yellow")]
+    [InlineData("mario64/data.win/sprites/spr_x/0.png", "mario64")]
+    public void Any_game_name_is_accepted_lowercased(string path, string game)
+    {
+        Assert.Equal(game, ModAddressParser.Parse(path).Game);
     }
 
     [Fact]

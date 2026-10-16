@@ -28,7 +28,7 @@ public sealed record ModTarget(string Game, string? Chapter)
     {
         string name = data.GeneralInfo?.Name?.Content ?? "";
         string game = name.ToLowerInvariant();
-        if (!ModAddressParser.IsKnownGame(game))
+        if (game.Length == 0)
             return null;
 
         // Whatever DisplayName adds after the game name is the chapter:
@@ -38,7 +38,7 @@ public sealed record ModTarget(string Game, string? Chapter)
             ? display[name.Length..].Replace(" ", "").ToLowerInvariant()
             : "";
 
-        return new ModTarget(game, chapter.Length == 0 ? null : chapter);
+        return new ModTarget(game, IsChapterName(chapter) ? chapter : null);
     }
 
     /// <summary>True when the address is for this game and this chapter.</summary>
@@ -68,11 +68,15 @@ public sealed record ModTarget(string Game, string? Chapter)
         if (chapter.Count == 0) return false;
         if (chapter.Count > 1) return true;
 
+        return !IsChapterName(chapter[0]);
+    }
+
+    private static bool IsChapterName(string segment)
+    {
         const string word = "chapter";
-        string segment = chapter[0];
-        return !(segment.StartsWith(word, StringComparison.OrdinalIgnoreCase)
-                 && segment.Length > word.Length
-                 && segment[word.Length..].All(char.IsAsciiDigit));
+        return segment.StartsWith(word, StringComparison.OrdinalIgnoreCase)
+               && segment.Length > word.Length
+               && segment[word.Length..].All(char.IsAsciiDigit);
     }
 
     public override string ToString() => Chapter is null ? Game : $"{Game} {Chapter}";

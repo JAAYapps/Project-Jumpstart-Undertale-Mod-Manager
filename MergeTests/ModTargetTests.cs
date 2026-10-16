@@ -30,6 +30,9 @@ public class ModTargetTests
     [InlineData("DELTARUNE", "DELTARUNE", "deltarune", null)]
     [InlineData("DELTARUNE", "DELTARUNE Chapter 1", "deltarune", "chapter1")]
     [InlineData("DELTARUNE", "DELTARUNE Chapter 2", "deltarune", "chapter2")]
+    [InlineData("Undertale_Yellow", "Undertale Yellow", "undertale_yellow", null)]
+    [InlineData("SOMEOTHERGAME", "Some Other Game", "someothergame", null)]
+    [InlineData("MYFANGAME", "MYFANGAME Demo", "myfangame", null)]
     public void FromData_reads_game_and_chapter(string name, string displayName, string game, string? chapter)
     {
         ModTarget? target = ModTarget.FromData(DataNamed(name, displayName));
@@ -37,9 +40,9 @@ public class ModTargetTests
     }
 
     [Fact]
-    public void FromData_returns_null_for_an_unknown_game()
+    public void FromData_returns_null_when_the_game_has_no_name()
     {
-        Assert.Null(ModTarget.FromData(DataNamed("SOMEOTHERGAME", "Some Other Game")));
+        Assert.Null(ModTarget.FromData(DataNamed("", "")));
     }
 
     [Theory]
@@ -55,6 +58,9 @@ public class ModTargetTests
     // target undertale
     [InlineData("undertale", null, "undertale/data.win/sprites/spr_x/0.png", true)]
     [InlineData("undertale", null, "deltarune/chapter2/data.win/sprites/spr_x/0.png", false)]
+    [InlineData("undertale", null, "undertale_yellow/data.win/sprites/spr_x/0.png", false)]
+    [InlineData("undertale_yellow", null, "undertale_yellow/data.win/sprites/spr_x/0.png", true)]
+    [InlineData("undertale_yellow", null, "undertale/data.win/sprites/spr_x/0.png", false)]
     public void Accepts_only_the_same_game_and_chapter(string game, string? chapter, string path, bool expected)
     {
         var target = new ModTarget(game, chapter);

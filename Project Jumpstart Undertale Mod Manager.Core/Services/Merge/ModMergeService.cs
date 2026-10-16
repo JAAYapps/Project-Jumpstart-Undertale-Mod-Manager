@@ -53,8 +53,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         var warnings = new List<string>();
         ModTarget? target = ModTarget.FromData(data);
         if (target is null)
-            warnings.Add($"data.win identifies as '{data.GeneralInfo?.Name?.Content}', not Undertale or Deltarune; " +
-                         "mod paths were not checked against the game.");
+            warnings.Add("data.win has no game name; mod paths were not checked against the game.");
 
         // === PHASE 3: gather + parse every address, build the last-wins plan =
         var plan = new Dictionary<string, PlannedAsset>();
@@ -66,6 +65,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         {
             int accepted = 0;
             var misspelled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var otherGames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
             {
@@ -77,6 +77,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 {
                     if (target.LooksMisspelled(addr))
                         misspelled.Add(string.Join("/", addr.RoutePrefix));
+                    else if (!addr.Game.Equals(target.Game, StringComparison.OrdinalIgnoreCase))
+                        otherGames.Add(addr.Game);
                     continue;
                 }
                 accepted++;
@@ -103,6 +105,9 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             foreach (string folder in misspelled)
                 warnings.Add($"[{mod.Name}] folder '{target!.Game}/{folder}' is not a chapter name " +
                              "(expected nothing, or chapter + a number such as chapter2); its files were skipped.");
+            if (accepted > 0)
+                foreach (string game in otherGames)
+                    warnings.Add($"[{mod.Name}] files under '{game}/' were skipped: this game is '{target!.Game}'.");
             if (accepted == 0)
                 warnings.Add(target is null
                     ? $"[{mod.Name}] has no files; skipped."

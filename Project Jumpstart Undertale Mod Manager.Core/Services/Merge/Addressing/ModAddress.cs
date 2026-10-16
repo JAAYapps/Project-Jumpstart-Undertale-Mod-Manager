@@ -70,10 +70,6 @@ public sealed class ModAddressFormatException : Exception
 
 public static class ModAddressParser
 {
-    private static readonly string[] KnownGames = { "undertale", "deltarune" };
-
-    public static bool IsKnownGame(string game) => KnownGames.Contains(game);
-
     public static ModAddress Parse(string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -89,9 +85,6 @@ public static class ModAddressParser
                 "Expected <game>/<route...>/<category>/<asset...>.");
 
         string game = parts[0].ToLowerInvariant();
-        if (!KnownGames.Contains(game))
-            throw new ModAddressFormatException(
-                $"Unknown game '{parts[0]}' in '{relativePath}'. Known: {string.Join(", ", KnownGames)}.");
 
         // Find the category: first segment after the game that is a known category keyword. After that is the asset.
         int categoryIndex = -1;
