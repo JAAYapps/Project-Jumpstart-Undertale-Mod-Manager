@@ -187,6 +187,27 @@ public sealed class TextureRepacker
 
         using var worker = new TextureWorker();
 
+        void Export(UndertaleTexturePageItem tex, string path)
+        {
+            bool drawnLarger = tex.TargetWidth >= tex.SourceWidth && tex.TargetHeight >= tex.SourceHeight
+                               && (tex.TargetWidth > tex.SourceWidth || tex.TargetHeight > tex.SourceHeight);
+            if (!drawnLarger)
+            {
+                worker.ExportAsPNG(tex, path);
+                return;
+            }
+
+            MagickImage page = worker.GetEmbeddedTexture(tex.TexturePage);
+            IMagickImage<byte> stored;
+            lock (page)
+                stored = page.CloneArea(tex.SourceX, tex.SourceY, tex.SourceWidth, tex.SourceHeight);
+            using (stored)
+            {
+                stored.Strip();
+                TextureWorker.SaveImageToFile(stored, path);
+            }
+        }
+
         void RecordSpriteFrame(UndertaleSprite? sprite)
         {
             if (sprite is null) return;
@@ -196,7 +217,7 @@ public sealed class TextureRepacker
                 if (tex is null) continue;
 
                 string key = $"{sprite.Name.Content}_{i}";
-                worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
+                Export(tex, Path.Combine(texturesDir, key + ".png"));
                 lock (gate)
                 {
                     coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
@@ -210,7 +231,7 @@ public sealed class TextureRepacker
             if (bg.Texture is null) return;
             UndertaleTexturePageItem tex = bg.Texture;
             string key = bg.Name.Content;
-            worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
+            Export(tex, Path.Combine(texturesDir, key + ".png"));
             lock (gate)
             {
                 coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];
@@ -223,7 +244,7 @@ public sealed class TextureRepacker
             if (font.Texture is null) return;
             UndertaleTexturePageItem tex = font.Texture;
             string key = font.Name.Content;
-            worker.ExportAsPNG(tex, Path.Combine(texturesDir, key + ".png"));
+            Export(tex, Path.Combine(texturesDir, key + ".png"));
             lock (gate)
             {
                 coords[key] = [tex.TargetX, tex.TargetY, tex.TargetWidth, tex.TargetHeight, tex.BoundingWidth, tex.BoundingHeight];

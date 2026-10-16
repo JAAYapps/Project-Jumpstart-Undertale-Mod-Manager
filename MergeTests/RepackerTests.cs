@@ -192,7 +192,8 @@ public class RepackerTests
 
         UndertaleData data = Load(src);
         UndertaleSprite sprite = data.Sprites
-            .Where(s => s?.Textures.Count > 0 && s.Textures[0]?.Texture is not null)
+            .Where(s => s?.Textures.Count > 0 && s.Textures[0]?.Texture is { } t
+                        && t.SourceWidth == t.TargetWidth && t.SourceHeight == t.TargetHeight)
             .MaxBy(s => Math.Max(s.Textures[0].Texture.BoundingWidth, s.Textures[0].Texture.BoundingHeight));
         Assert.NotNull(sprite);
         UndertaleTexturePageItem original = sprite.Textures[0].Texture;
@@ -236,6 +237,62 @@ public class RepackerTests
             TryDelete(emptyOverrides);
             TryDeleteFile(outPath);
         }
+    }
+
+    [Fact]
+    public async Task Repack_PictureDrawnLargerThanStored_KeepsItsStoredSizeAndPixels()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src))
+        {
+            _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping.");
+            return;
+        }
+
+        UndertaleData data = Load(src);
+        UndertaleSprite sprite = data.Sprites.First(s =>
+            s?.Textures.Count > 0 && s.Textures[0]?.Texture is { } t &&
+            t.SourceWidth == t.TargetWidth && t.SourceHeight == t.TargetHeight && t.SourceWidth is > 1 and < 200 && t.SourceHeight is > 1 and < 200);
+        UndertaleTexturePageItem item = sprite.Textures[0].Texture;
+        item.TargetX = 0;
+        item.TargetY = 0;
+        item.TargetWidth = item.BoundingWidth = (ushort)(item.SourceWidth * 2);
+        item.TargetHeight = item.BoundingHeight = (ushort)(item.SourceHeight * 2);
+        (ushort width, ushort height) stored = (item.SourceWidth, item.SourceHeight);
+        byte[] storedPixels = StoredPixels(item);
+        _out.WriteLine($"Sprite {sprite.Name.Content} frame 0: stored {stored.width}x{stored.height}, now drawn {item.TargetWidth}x{item.TargetHeight}.");
+
+        string emptyOverrides = Path.Combine(Path.GetTempPath(), "pjum_larger_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(emptyOverrides);
+        string outPath = Path.Combine(Path.GetTempPath(), "pjum_larger_" + Guid.NewGuid().ToString("N") + ".win");
+
+        try
+        {
+            RepackResult result = await new TextureRepacker().RepackAsync(data, emptyOverrides);
+            foreach (string w in result.Warnings)
+                _out.WriteLine("WARN: " + w);
+
+            Save(data, outPath);
+            UndertaleTexturePageItem after = Load(outPath).Sprites.ByName(sprite.Name.Content).Textures[0].Texture;
+            Assert.Equal(stored.width, after.SourceWidth);
+            Assert.Equal(stored.height, after.SourceHeight);
+            Assert.Equal(stored.width * 2, after.TargetWidth);
+            Assert.Equal(stored.height * 2, after.TargetHeight);
+            Assert.Equal(storedPixels, StoredPixels(after));
+        }
+        finally
+        {
+            TryDelete(emptyOverrides);
+            TryDeleteFile(outPath);
+        }
+    }
+
+    private static byte[] StoredPixels(UndertaleTexturePageItem item)
+    {
+        using var worker = new TextureWorker();
+        MagickImage page = worker.GetEmbeddedTexture(item.TexturePage);
+        using IMagickImage<byte> stored = page.CloneArea(item.SourceX, item.SourceY, item.SourceWidth, item.SourceHeight);
+        return stored.GetPixels().ToByteArray(PixelMapping.RGBA)!;
     }
 
     private static void TryDelete(string dir)
