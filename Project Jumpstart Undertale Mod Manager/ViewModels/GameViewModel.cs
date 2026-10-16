@@ -13,6 +13,7 @@ using CommunityToolkit.Mvvm.Input;
 using MsBox.Avalonia.Enums;
 using Project_Jumpstart_Undertale_Mod_Manager.Models;
 using Project_Jumpstart_Undertale_Mod_Manager.Reporting;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
@@ -26,6 +27,10 @@ public partial class GameViewModel : ViewModelBase
     private readonly ILauncherService _launcherService;
     
     private readonly IModMergeService _mergeService;
+
+    private readonly IGameLocatorService _gameLocator;
+
+    private bool _choicesLoaded;
     
     public string GameName => new DirectoryInfo(GameDirectory).Name;
     
@@ -54,12 +59,13 @@ public partial class GameViewModel : ViewModelBase
     [ObservableProperty]
     public partial ModItem? SelectedMod { get; set; }
 
-    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, string gamePath)
+    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, string gamePath)
     {
         GameDirectory = gamePath;
         _storageProvider = storageProvider;
         _launcherService = launcherService;
         _mergeService =  mergeService;
+        _gameLocator = gameLocator;
         
         // Scan for executables
         var exes = Directory.GetFiles(gamePath, "*.exe");
@@ -76,6 +82,11 @@ public partial class GameViewModel : ViewModelBase
         // Set defaults if files exist
         if (Executables.Count > 0) SelectedExecutable = Executables[0];
         if (DataFiles.Count > 0) SelectedDataFile = DataFiles[0];
+
+        GameEntry? saved = gameLocator.GetEntry(gamePath);
+        if (saved?.Executable is string savedExe && Executables.Contains(savedExe)) SelectedExecutable = savedExe;
+        if (saved?.DataFile is string savedData && DataFiles.Contains(savedData)) SelectedDataFile = savedData;
+        _choicesLoaded = true;
         
         DiscoverMergeTargets();
         if (MergeTargets.Count > 0) SelectedTarget = MergeTargets[0];
@@ -83,6 +94,18 @@ public partial class GameViewModel : ViewModelBase
         RefreshMods();
     }
     
+    partial void OnSelectedExecutableChanged(string value)
+    {
+        if (_choicesLoaded)
+            _gameLocator.SaveChoices(GameDirectory, SelectedExecutable, SelectedDataFile);
+    }
+
+    partial void OnSelectedDataFileChanged(string value)
+    {
+        if (_choicesLoaded)
+            _gameLocator.SaveChoices(GameDirectory, SelectedExecutable, SelectedDataFile);
+    }
+
     [RelayCommand]
     private async Task AddModAsync()
     {

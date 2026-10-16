@@ -44,8 +44,10 @@ public partial class MainWindowViewModel : ViewModelBase
         _mergeService = mergeService;
         var games = gameLocator.FindGameInstallations();
         SendLog($"Found {games.Count} game installations");
+        foreach (string missing in gameLocator.MissingGames)
+            SendLog($"Added game not found, skipped until its folder is back: {missing}", LogLevel.Warn);
         foreach (var game in games)
-            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, game));
+            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, gameLocator, game));
         if (Games.Count > 0)
             SelectedGame = Games[0];
         SendLog("Ready.");
@@ -67,13 +69,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (files.Count > 0)
         {
-            string filePath = files[0].Path.LocalPath;
-            _gameLocator?.AddCustomGame(filePath);
+            string filePath = _gameLocator?.AddCustomGame(files[0].Path.LocalPath) ?? files[0].Path.LocalPath;
 
             GameViewModel? game = Games.FirstOrDefault(g => g.GameDirectory == filePath);
-            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null)
+            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null && _gameLocator is not null)
             {
-                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, filePath);
+                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, _gameLocator, filePath);
                 Games.Add(game);
             }
             SelectedGame = game ?? SelectedGame;
