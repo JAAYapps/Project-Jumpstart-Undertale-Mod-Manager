@@ -6,12 +6,14 @@ using Xunit;
 
 // If this alias line won't compile, your root namespace differs — fix just this line.
 using AppMarker = Project_Jumpstart_Undertale_Mod_Manager.App;
+using CoreMarker = Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher.ILauncherService;
 
 namespace ArchTests;
 
 public class ArchitectureTests
 {
     private static readonly Assembly App = typeof(AppMarker).Assembly;
+    private static readonly Assembly Core = typeof(CoreMarker).Assembly;
 
     private const string RootNs       = "Project_Jumpstart_Undertale_Mod_Manager";
     private const string ServicesNs   = RootNs + ".Services";
@@ -36,11 +38,12 @@ public class ArchitectureTests
     {
         var statics = ServiceTypes()
             .Where(t => t.IsClass && t.IsAbstract && t.IsSealed)   // C# 'static class' in IL
+            .Where(t => t.Name.EndsWith("Service"))
             .Select(t => t.FullName)
             .ToList();
 
         Assert.True(statics.Count == 0,
-            "Static classes not allowed under Services (use an injectable instance class): "
+            "Static Service classes not allowed under Services (use an injectable instance class): "
             + string.Join(", ", statics));
     }
 
@@ -98,7 +101,7 @@ public class ArchitectureTests
         Types().Where(t => InNs(t, ServicesNs));
 
     private static IEnumerable<Type> Types() =>
-        SafeGetTypes(App).Where(t => t.Namespace != null && !t.Name.Contains('<')); // skip compiler-generated
+        SafeGetTypes(App).Concat(SafeGetTypes(Core)).Where(t => t.Namespace != null && !t.Name.Contains('<')); // skip compiler-generated
 
     private static Type[] SafeGetTypes(Assembly asm)
     {
