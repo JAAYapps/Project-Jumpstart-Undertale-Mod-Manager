@@ -17,6 +17,55 @@ public class LauncherService : ILauncherService
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
+    public GameCopyResult RefreshGameCopy(string gameDir, string copyDir)
+    {
+        int copied = 0, removed = 0;
+        long bytes = 0;
+        var wanted = new HashSet<string>(StringComparer.Ordinal);
+        Directory.CreateDirectory(copyDir);
+
+        foreach (string dir in Directory.GetDirectories(gameDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(gameDir, dir);
+            if (IsModsFolder(rel)) continue;
+            wanted.Add(rel);
+            Directory.CreateDirectory(Path.Combine(copyDir, rel));
+        }
+
+        foreach (string file in Directory.GetFiles(gameDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(gameDir, file);
+            if (IsModsFolder(rel)) continue;
+            wanted.Add(rel);
+
+            var source = new FileInfo(file);
+            var target = new FileInfo(Path.Combine(copyDir, rel));
+            if (target.Exists && target.Length == source.Length && target.LastWriteTimeUtc == source.LastWriteTimeUtc)
+                continue;
+
+            File.Copy(source.FullName, target.FullName, overwrite: true);
+            File.SetLastWriteTimeUtc(target.FullName, source.LastWriteTimeUtc);
+            copied++;
+            bytes += source.Length;
+        }
+
+        foreach (string file in Directory.GetFiles(copyDir, "*", SearchOption.AllDirectories))
+        {
+            if (wanted.Contains(Path.GetRelativePath(copyDir, file))) continue;
+            File.Delete(file);
+            removed++;
+        }
+
+        foreach (string dir in Directory.GetDirectories(copyDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+            if (!wanted.Contains(Path.GetRelativePath(copyDir, dir)))
+                Directory.Delete(dir, true);
+
+        return new GameCopyResult(copied, bytes, removed);
+    }
+
+    private static bool IsModsFolder(string rel) =>
+        rel.Split(Path.DirectorySeparatorChar)[0].Equals("mods", StringComparison.OrdinalIgnoreCase);
+
     public IReadOnlyList<string> FindSpaceCutFiles(string exePath)
     {
         var found = new List<string>();

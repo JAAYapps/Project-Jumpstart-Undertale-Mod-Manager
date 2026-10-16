@@ -411,14 +411,14 @@ public partial class GameViewModel : ViewModelBase
         SaveMods();
 
         string managerRoot = AppContext.BaseDirectory;
-        
-        SweepTempGames(managerRoot); // Just in case try to delete doesn't work.
+        string tempGameDir = Path.Combine(managerRoot, "tempgame", GameName);
 
-        string tempGameDir = Path.Combine(managerRoot, "tempgame", Guid.NewGuid().ToString("N"));
+        SweepTempGames(managerRoot, tempGameDir); // Just in case try to delete doesn't work.
 
         try
         {
-            CopyGameDir(GameDirectory, tempGameDir);
+            GameCopyResult copy = _launcherService.RefreshGameCopy(GameDirectory, tempGameDir);
+            MainWindowViewModel.SendLog($"Game copy ready: {copy.FilesCopied} files copied ({copy.BytesCopied / 1_000_000} MB), {copy.FilesRemoved} removed.");
 
             string relTargetDir = Path.GetRelativePath(GameDirectory, SelectedTarget.DataDirectory);
             string mergeDir = Path.Combine(tempGameDir, relTargetDir);
@@ -473,31 +473,6 @@ public partial class GameViewModel : ViewModelBase
         {
             await (Application.Current?.ShowError(ex.Message, "Launch failed") ?? Task.FromResult(ButtonResult.Ok));
             MainWindowViewModel.SendLog(ex.Message);
-        }
-        finally
-        {
-            TryDeleteDir(tempGameDir);
-        }
-    }
-
-    private static void CopyGameDir(string sourceDir, string destDir)
-    {
-        Directory.CreateDirectory(destDir);
-        foreach (string dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            string rel = Path.GetRelativePath(sourceDir, dir);
-            if (rel.Split(Path.DirectorySeparatorChar)[0].Equals("mods", StringComparison.OrdinalIgnoreCase))
-                continue;   // don't copy the manager's own mods folder into the runtime
-            Directory.CreateDirectory(Path.Combine(destDir, rel));
-        }
-        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            string rel = Path.GetRelativePath(sourceDir, file);
-            if (rel.Split(Path.DirectorySeparatorChar)[0].Equals("mods", StringComparison.OrdinalIgnoreCase))
-                continue;
-            string target = Path.Combine(destDir, rel);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
         }
     }
 

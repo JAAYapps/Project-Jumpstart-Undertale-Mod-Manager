@@ -6,6 +6,8 @@ public interface ILauncherService
 
     IReadOnlyList<string> FindSpaceCutFiles(string exePath);
 
+    GameCopyResult RefreshGameCopy(string gameDir, string copyDir);
+
     /// <summary>Show a folder in the system file manager.</summary>
     void OpenFolder(string path);
 }
