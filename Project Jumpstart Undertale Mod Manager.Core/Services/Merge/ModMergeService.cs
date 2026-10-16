@@ -184,7 +184,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
         // ---- plan is VALID. Only now do we mutate. ------------------------
 
-        // === PHASE 5a: Tier 1 (paths wired; sounds wired; objects stubbed) ==
+        // === PHASE 5a: Tier 1 (paths wired; sounds wired) ==
         // Sounds are grouped by asset first, because a sound is up to TWO files
         // (<name>.json metadata + <name>.ogg/.wav bytes) sharing one asset key.
         

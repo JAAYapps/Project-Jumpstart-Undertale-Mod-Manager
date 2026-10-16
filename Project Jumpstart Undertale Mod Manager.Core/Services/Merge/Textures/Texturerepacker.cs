@@ -24,9 +24,10 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
 //   1. Export every existing sprite frame / background / font PNG to a temp dir,
 //      recording each one's target/bounding coords so they survive the repack.
 //   2. Overlay the mod's override PNGs on top (same filename => mod.win).
-//   3. Clear ALL texture page items + embedded textures.
+//   3. Clear the texture page items + embedded textures, except the ones embedded images use.
 //   4. Pack the whole pile into fresh atlases.
 //   5. Rebuild every texture page item and re-wire sprites/backgrounds/fonts.
+//      Anything too big to pack gets its old page item and page back.
 //
 // The same-size fast-path (item.ReplaceTexture for identical dimensions,
 // skipping the repack) is intentionally NOT here yet — deferred until this
@@ -111,7 +112,7 @@ public sealed class TextureRepacker
                 File.Copy(src, dest, overwrite: true);
             }
 
-            // 3. Wipe existing pages/items — we rebuild all of them.
+            // 3. Wipe existing pages/items, but keep the ones embedded images use.
             // data.TexturePageItems.Clear();
             // data.EmbeddedTextures.Clear();
 

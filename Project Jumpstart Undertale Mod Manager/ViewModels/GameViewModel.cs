@@ -413,7 +413,7 @@ public partial class GameViewModel : ViewModelBase
         string managerRoot = AppContext.BaseDirectory;
         string tempGameDir = Path.Combine(managerRoot, "tempgame", GameName);
 
-        SweepTempGames(managerRoot, tempGameDir); // Just in case try to delete doesn't work.
+        SweepTempGames(managerRoot, tempGameDir);
 
         try
         {

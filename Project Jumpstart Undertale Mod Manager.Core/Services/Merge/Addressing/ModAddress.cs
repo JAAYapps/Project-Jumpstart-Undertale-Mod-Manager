@@ -45,7 +45,7 @@ public enum AssetCategory
 /// nothing here has been checked against a real data file.
 /// </summary>
 public sealed record ModAddress(
-    string Game,                        // "undertale" | "deltarune"
+    string Game,
     IReadOnlyList<string> Route,        // ["data.win"] | ["chapter2","audiogroup1"] — game-specific meaning
     AssetCategory Category,
     string AssetName,                   // "spr_susie", "gml_Script_scr_x", "bg_ruinsbg"
