@@ -35,7 +35,7 @@ public partial class App : Application
         // Register your services here
         collection.AddSingleton<IGameLocatorService, GameLocatorService>();
         collection.AddSingleton<ILauncherService, LauncherService>();
-        collection.AddSingleton<IDataService, UndertaleDataService>();
+        collection.AddSingleton<IDataService, DataService>();
         collection.AddSingleton<IModMergeService, ModMergeService>();
         collection.AddSingleton<ISteamScanner, CrossPlatformSteamScanner>();
         collection.AddSingleton<IProtonLocatorService, ProtonLocatorService>();
