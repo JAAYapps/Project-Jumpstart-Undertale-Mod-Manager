@@ -54,7 +54,36 @@
             </Grid>
         </TabItem>
         
-        <TabItem Header="Codes"/>
+        <TabItem Header="Codes">
+            <Grid ColumnDefinitions="1.5*, *">
+                <DataGrid Grid.Column="0" Margin="10"
+                          ItemsSource="{Binding Codes}"
+                          SelectedItem="{Binding SelectedCode}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="False"
+                          GridLinesVisibility="All"
+                          BorderThickness="1" BorderBrush="Gray">
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn>
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:CodeItem">
+                                    <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" IsReadOnly="True" Width="*" />
+                        <DataGridTextColumn Header="Target" Binding="{Binding Target}" IsReadOnly="True" Width="Auto" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <StackPanel Grid.Column="1" Margin="10" Spacing="10">
+                    <TextBlock Text="{Binding SelectedCode.Name, FallbackValue=''}" FontWeight="Bold" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding SelectedCode.Description, FallbackValue=''}" TextWrapping="Wrap"/>
+                    <TextBlock IsVisible="{Binding HasNoCodes}" TextWrapping="Wrap"
+                               Text="{Binding CodesFile, StringFormat='No codes for this game yet. Codes are read from {0}'}"/>
+                </StackPanel>
+            </Grid>
+        </TabItem>
         <TabItem Header="Game Config">
             <StackPanel IsVisible="{Binding HasMultipleTargets}" Spacing="5">
                 <TextBlock Text="Chapter / Merge Target:" FontWeight="Bold" Margin="0,10,0,0"/>

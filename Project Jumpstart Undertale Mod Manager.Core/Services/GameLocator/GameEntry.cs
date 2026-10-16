@@ -8,4 +8,5 @@ public sealed class GameEntry
     public string? DataFile { get; set; }
     public string? Runner { get; set; }
     public string? Proton { get; set; }
+    public List<string> EnabledCodes { get; set; } = [];
 }

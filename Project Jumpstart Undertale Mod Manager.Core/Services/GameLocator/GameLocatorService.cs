@@ -109,6 +109,19 @@ public class GameLocatorService : IGameLocatorService
         SaveEntries(entries);
     }
 
+    public void SaveEnabledCodes(string path, IEnumerable<string> codeNames)
+    {
+        var entries = LoadEntries();
+        GameEntry? entry = FindEntry(entries, path);
+        if (entry is null)
+        {
+            entry = new GameEntry { Path = NormalizePath(path) };
+            entries.Add(entry);
+        }
+        entry.EnabledCodes = codeNames.ToList();
+        SaveEntries(entries);
+    }
+
     private static string NormalizePath(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
     private static GameEntry? FindEntry(List<GameEntry> entries, string path)

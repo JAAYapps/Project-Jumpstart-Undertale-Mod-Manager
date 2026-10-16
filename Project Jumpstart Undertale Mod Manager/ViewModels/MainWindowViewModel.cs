@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Project_Jumpstart_Undertale_Mod_Manager.Models;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
@@ -24,6 +25,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ILauncherService? _launcherService = null;
     private readonly IModMergeService? _mergeService = null;
     private readonly IProtonLocatorService? _protonLocator = null;
+    private readonly ICodesService? _codesService = null;
 
     [ObservableProperty]
     public partial bool ShowCredits { get; set; } = false;
@@ -38,19 +40,20 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private GameViewModel? _selectedGame;
     
-    public MainWindowViewModel(IStorageProvider storageProvider, IGameLocatorService gameLocator, ILauncherService launcherService, IModMergeService mergeService, IProtonLocatorService protonLocator)
+    public MainWindowViewModel(IStorageProvider storageProvider, IGameLocatorService gameLocator, ILauncherService launcherService, IModMergeService mergeService, IProtonLocatorService protonLocator, ICodesService codesService)
     {
         _storageProvider = storageProvider;
         _gameLocator = gameLocator;
         _launcherService = launcherService;
         _mergeService = mergeService;
         _protonLocator = protonLocator;
+        _codesService = codesService;
         var games = gameLocator.FindGameInstallations();
         SendLog($"Found {games.Count} game installations");
         foreach (string missing in gameLocator.MissingGames)
             SendLog($"Added game not found, skipped until its folder is back: {missing}", LogLevel.Warn);
         foreach (var game in games)
-            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, gameLocator, protonLocator, game));
+            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, gameLocator, protonLocator, codesService, game));
         if (Games.Count > 0)
             SelectedGame = Games[0];
         SendLog("Ready.");
@@ -75,9 +78,9 @@ public partial class MainWindowViewModel : ViewModelBase
             string filePath = _gameLocator?.AddCustomGame(files[0].Path.LocalPath) ?? files[0].Path.LocalPath;
 
             GameViewModel? game = Games.FirstOrDefault(g => g.GameDirectory == filePath);
-            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null && _gameLocator is not null && _protonLocator is not null)
+            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null && _gameLocator is not null && _protonLocator is not null && _codesService is not null)
             {
-                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, _gameLocator, _protonLocator, filePath);
+                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, _gameLocator, _protonLocator, _codesService, filePath);
                 Games.Add(game);
             }
             SelectedGame = game ?? SelectedGame;

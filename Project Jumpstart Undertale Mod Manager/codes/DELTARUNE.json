@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Show FPS (Chapter 2)",
+    "description": "Shows the frames per second in the top left corner, on every screen including the menus.",
+    "target": "deltarune/chapter2",
+    "patches": [
+      {
+        "entry": "gml_Object_obj_time_Draw_64",
+        "op": "append",
+        "code": "draw_set_color(c_yellow);\ndraw_text(4, 4, \"FPS: \" + string(fps));\ndraw_set_color(c_white);"
+      }
+    ]
+  },
+  {
+    "name": "Infinite HP (Chapter 2)",
+    "description": "Refills everyone's HP to full every frame.",
+    "target": "deltarune/chapter2",
+    "patches": [
+      {
+        "entry": "gml_Object_obj_time_Step_0",
+        "op": "append",
+        "code": "if (variable_global_exists(\"hp\") && variable_global_exists(\"maxhp\"))\n{\n    for (var i = 0; i < array_length(global.hp) && i < array_length(global.maxhp); i++)\n        global.hp[i] = global.maxhp[i];\n}"
+      }
+    ]
+  }
+]

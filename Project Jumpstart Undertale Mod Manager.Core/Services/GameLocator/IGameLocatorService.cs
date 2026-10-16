@@ -9,4 +9,5 @@ public interface IGameLocatorService
     string AddCustomGame(string path);
     GameEntry? GetEntry(string path);
     void SaveChoices(string path, string? executable, string? dataFile, string? runner, string? proton);
+    void SaveEnabledCodes(string path, IEnumerable<string> codeNames);
 }

@@ -6,6 +6,7 @@ using Avalonia.Data.Core.Plugins;
 using System.Linq;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
@@ -39,6 +40,7 @@ public partial class App : Application
         collection.AddSingleton<IModMergeService, ModMergeService>();
         collection.AddSingleton<ISteamScanner, CrossPlatformSteamScanner>();
         collection.AddSingleton<IProtonLocatorService, ProtonLocatorService>();
+        collection.AddSingleton<ICodesService, CodesService>();
         
         Services = collection.BuildServiceProvider();
 

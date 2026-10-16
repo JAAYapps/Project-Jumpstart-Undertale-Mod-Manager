@@ -13,6 +13,7 @@ using CommunityToolkit.Mvvm.Input;
 using MsBox.Avalonia.Enums;
 using Project_Jumpstart_Undertale_Mod_Manager.Models;
 using Project_Jumpstart_Undertale_Mod_Manager.Reporting;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
@@ -33,6 +34,8 @@ public partial class GameViewModel : ViewModelBase
 
     private readonly IProtonLocatorService _protonLocator;
 
+    private readonly ICodesService _codesService;
+
     private const string Automatic = "Automatic";
 
     private bool _choicesLoaded;
@@ -51,6 +54,12 @@ public partial class GameViewModel : ViewModelBase
     public bool IsProtonChosen => IsLinux && SelectedRunner == "Proton";
     
     public ObservableCollection<ModItem> Mods { get; } = [];
+
+    public ObservableCollection<CodeItem> Codes { get; } = [];
+
+    public bool HasNoCodes => Codes.Count == 0;
+
+    public string CodesFile => _codesService.CodesFileFor(GameName);
 
     public ObservableCollection<MergeTarget> MergeTargets { get; } = [];
     
@@ -79,7 +88,10 @@ public partial class GameViewModel : ViewModelBase
     [ObservableProperty]
     public partial ModItem? SelectedMod { get; set; }
 
-    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, string gamePath)
+    [ObservableProperty]
+    public partial CodeItem? SelectedCode { get; set; }
+
+    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, ICodesService codesService, string gamePath)
     {
         GameDirectory = gamePath;
         _storageProvider = storageProvider;
@@ -87,6 +99,7 @@ public partial class GameViewModel : ViewModelBase
         _mergeService =  mergeService;
         _gameLocator = gameLocator;
         _protonLocator = protonLocator;
+        _codesService = codesService;
         
         // Scan for executables
         var exes = Directory.GetFiles(gamePath, "*.exe");
@@ -120,6 +133,33 @@ public partial class GameViewModel : ViewModelBase
         if (MergeTargets.Count > 0) SelectedTarget = MergeTargets[0];
         
         RefreshMods();
+        RefreshCodes(saved);
+    }
+
+    private void RefreshCodes(GameEntry? saved)
+    {
+        Codes.Clear();
+        IReadOnlyList<CheatCode> codes;
+        try
+        {
+            codes = _codesService.LoadCodes(GameName);
+        }
+        catch (InvalidDataException ex)
+        {
+            MainWindowViewModel.SendLog(ex.Message, LogLevel.Warn);
+            return;
+        }
+
+        foreach (CheatCode code in codes)
+        {
+            var item = new CodeItem(code) { IsEnabled = saved?.EnabledCodes.Contains(code.Name) == true };
+            item.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(CodeItem.IsEnabled))
+                    _gameLocator.SaveEnabledCodes(GameDirectory, Codes.Where(c => c.IsEnabled).Select(c => c.Name));
+            };
+            Codes.Add(item);
+        }
     }
     
     partial void OnSelectedExecutableChanged(string value) => SaveChoices();
@@ -414,6 +454,7 @@ public partial class GameViewModel : ViewModelBase
         string tempGameDir = Path.Combine(managerRoot, "tempgame", GameName);
 
         SweepTempGames(managerRoot, tempGameDir);
+        string? codesDir = null;
 
         try
         {
@@ -431,6 +472,14 @@ public partial class GameViewModel : ViewModelBase
             foreach (var m in Mods)
                 if (m.IsEnabled)
                     modList.Add(new ModSource(m.Name, m.ModDirectory));
+
+            List<CheatCode> enabledCodes = Codes.Where(c => c.IsEnabled).Select(c => c.Code).ToList();
+            if (enabledCodes.Count > 0)
+            {
+                codesDir = Path.Combine(Path.GetTempPath(), "pjum_codes_" + Guid.NewGuid().ToString("N"));
+                _codesService.WriteCodesMod(enabledCodes, codesDir);
+                modList.Add(new ModSource(CodesService.ModName, codesDir));
+            }
 
             var result = await _mergeService.ApplyAsync(mergeDir, modList, tempGameDir);
 
@@ -473,6 +522,11 @@ public partial class GameViewModel : ViewModelBase
         {
             await (Application.Current?.ShowError(ex.Message, "Launch failed") ?? Task.FromResult(ButtonResult.Ok));
             MainWindowViewModel.SendLog(ex.Message);
+        }
+        finally
+        {
+            if (codesDir is not null)
+                TryDeleteDir(codesDir);
         }
     }
 
