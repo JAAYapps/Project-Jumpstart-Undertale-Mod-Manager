@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Show FPS",
+    "description": "Shows the frames per second in the top left corner, on every screen including the menus.",
+    "target": "undertale",
+    "patches": [
+      {
+        "entry": "gml_Object_obj_time_Draw_64",
+        "op": "append",
+        "code": "draw_set_color(c_yellow);\ndraw_text(4, 4, \"FPS: \" + string(fps));\ndraw_set_color(c_white);"
+      }
+    ]
+  },
+  {
+    "name": "Infinite HP",
+    "description": "Refills your HP to full every frame.",
+    "target": "undertale",
+    "patches": [
+      {
+        "entry": "gml_Object_obj_time_Step_1",
+        "op": "prepend",
+        "code": "if (variable_global_exists(\"hp\") && variable_global_exists(\"maxhp\"))\n    global.hp = global.maxhp;"
+      }
+    ]
+  }
+]

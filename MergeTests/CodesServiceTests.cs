@@ -155,24 +155,18 @@ public class CodesServiceTests : IDisposable
         Assert.Contains("pjum_code_marker = 7", Decompile(after, entry));
     }
 
-    [Fact]
-    public async Task The_shipped_Deltarune_codes_compile_into_chapter_2()
+    private async Task ShippedCodesCompile(string dataWin, string gameName, string target, string hpEntry)
     {
-        string? src = TestPaths.DataWin;
-        string? deltarune = src is null ? null : Path.GetDirectoryName(src);
-        string? chapter2 = deltarune is null ? null : Path.Combine(deltarune, "chapter2_windows", "data.win");
-        if (chapter2 is null || !File.Exists(chapter2))
-        {
-            _out.WriteLine("Deltarune chapter 2 not found next to the test data.win — skipping.");
-            return;
-        }
+        IReadOnlyList<CheatCode> codes = new CodesService(ShippedCodesFolder).LoadCodes(gameName)
+            .Where(c => c.Target == target).ToList();
+        _out.WriteLine($"{target}: {string.Join(", ", codes.Select(c => c.Name))}");
+        Assert.Equal(2, codes.Count);
 
-        IReadOnlyList<CheatCode> codes = new CodesService(ShippedCodesFolder).LoadCodes("DELTARUNE");
-        string gameDir = Path.Combine(_root, "chapter2");
+        string gameDir = Path.Combine(_root, "game_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(gameDir);
-        File.Copy(chapter2, Path.Combine(gameDir, "data.win"));
-        string mod = Path.Combine(_root, "codesmod");
-        new CodesService(_root).WriteCodesMod(codes.Where(c => c.Target == "deltarune/chapter2"), mod);
+        File.Copy(dataWin, Path.Combine(gameDir, "data.win"));
+        string mod = Path.Combine(_root, "codesmod_" + Guid.NewGuid().ToString("N"));
+        new CodesService(_root).WriteCodesMod(codes, mod);
 
         MergeResult result = await new ModMergeService(new DirectDataService())
             .ApplyAsync(gameDir, new List<ModSource> { new(CodesService.ModName, mod) });
@@ -182,6 +176,42 @@ public class CodesServiceTests : IDisposable
         Assert.Empty(result.Warnings);
         UndertaleData after = await new DirectDataService().LoadAsync(Path.Combine(gameDir, "data.win"));
         Assert.Contains("FPS: ", Decompile(after, "gml_Object_obj_time_Draw_64"));
-        Assert.Contains("global.maxhp", Decompile(after, "gml_Object_obj_time_Step_0"));
+        string hp = Decompile(after, hpEntry);
+        Assert.Contains("global.maxhp", hp);
+        Assert.True(hp.IndexOf("global.maxhp", StringComparison.Ordinal) < hp.IndexOf("exit", StringComparison.Ordinal) || !hp.Contains("exit"),
+            "Infinite HP must run before any exit in " + hpEntry);
+    }
+
+    [Theory]
+    [InlineData(1, "gml_Object_obj_time_Step_1")]
+    [InlineData(2, "gml_Object_obj_time_Step_0")]
+    [InlineData(3, "gml_Object_obj_time_Step_0")]
+    [InlineData(4, "gml_Object_obj_time_Step_0")]
+    [InlineData(5, "gml_Object_obj_time_Step_0")]
+    public async Task The_shipped_Deltarune_codes_compile_into_each_chapter(int chapter, string hpEntry)
+    {
+        string? src = TestPaths.DataWin;
+        string? deltarune = src is null ? null : Path.GetDirectoryName(src);
+        string? dataWin = deltarune is null ? null : Path.Combine(deltarune, $"chapter{chapter}_windows", "data.win");
+        if (dataWin is null || !File.Exists(dataWin))
+        {
+            _out.WriteLine($"Deltarune chapter {chapter} not found next to the test data.win — skipping.");
+            return;
+        }
+
+        await ShippedCodesCompile(dataWin, "DELTARUNE", $"deltarune/chapter{chapter}", hpEntry);
+    }
+
+    [Fact]
+    public async Task The_shipped_Undertale_codes_compile()
+    {
+        string? dataWin = TestPaths.UndertaleDataWin;
+        if (dataWin is null)
+        {
+            _out.WriteLine("Undertale not found — skipping.");
+            return;
+        }
+
+        await ShippedCodesCompile(dataWin, "Undertale", "undertale", "gml_Object_obj_time_Step_1");
     }
 }

@@ -17,6 +17,8 @@ public static class TestPaths
         ?? Discover("DELTARUNE", "data.win")
         ?? Discover("Undertale", "data.win");
 
+    public static string? UndertaleDataWin => Discover("Undertale", "data.win");
+
     // A Deltarune chapter dir (its own data.win + audiogroupN.dat + loose .ogg).
     public static string? DeltaruneChapter
     {
