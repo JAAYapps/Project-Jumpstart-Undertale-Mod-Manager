@@ -291,14 +291,17 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
         
         // Note: Event connect to gml scripts and if a newly created object ties to connect an event that is missing (gml code script added in code section), may result in an object build failure
-        // Events right now don't currently link to objects, so theory of the build failure isn't confirmed 
         
         // === PHASE 5c: objects -> CodeImportGroup ================================
+        foreach (KeyValuePair<string, (ModAddress address, string owningMod, string sourceFile, bool create)> obj in objectlist)
+            if (obj.Value.create)
+                Objects.ObjectImporter.CreateEmpty(data, obj.Value.address.AssetName);
+
         foreach (KeyValuePair<string, (ModAddress address, string owningMod, string sourceFile, bool create)> obj in objectlist)
         {
             try
             {
-                Objects.ObjectImporter.Apply(data, obj.Value.address, obj.Value.sourceFile, obj.Value.create);
+                Objects.ObjectImporter.Apply(data, obj.Value.address, obj.Value.sourceFile, false);
             }
             catch (Exception ex)
             {

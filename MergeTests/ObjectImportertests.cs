@@ -143,6 +143,62 @@ public class ObjectImporterTests
         }
     }
 
+    private static string WriteObjectMod(string root, UndertaleData probe, string modName, string objName, string json)
+    {
+        string mod = Path.Combine(root, modName);
+        Directory.CreateDirectory(mod);
+        File.WriteAllText(Path.Combine(mod, "mod.json"),
+            "{ \"name\": \"" + modName + "\", \"version\": \"1.0.0\", " +
+            "\"newAssets\": { \"objects\": { \"" + objName + "\": {} } } }");
+        string objDir = Path.Combine(TestPaths.ModRoot(mod, probe), "objects");
+        Directory.CreateDirectory(objDir);
+        File.WriteAllText(Path.Combine(objDir, objName + ".json"), json);
+        return mod;
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NewObject_can_use_another_new_object_as_parent_and_collision_target(bool childLoadsFirst)
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        UndertaleData probe = Load(src);
+        string root = Path.Combine(Path.GetTempPath(), "pjum_obj_" + Guid.NewGuid().ToString("N"));
+        string gameDir = PrepareGameDir(src);
+        const string child = "obj_pjum_child";
+        const string parent = "obj_pjum_parent";
+
+        try
+        {
+            string childMod = WriteObjectMod(root, probe, "ChildMod", child,
+                "{ \"parent\": \"" + parent + "\", " +
+                "\"events\": [ { \"type\": \"Collision\", \"subtype\": \"" + parent + "\" } ] }");
+            string parentMod = WriteObjectMod(root, probe, "ParentMod", parent, "{ \"visible\": true }");
+            var mods = childLoadsFirst
+                ? new List<ModSource> { new("ChildMod", childMod), new("ParentMod", parentMod) }
+                : new List<ModSource> { new("ParentMod", parentMod), new("ChildMod", childMod) };
+
+            MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(gameDir, mods);
+            foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+
+            Assert.True(result.Success, result.Reason);
+            UndertaleData after = Load(Path.Combine(gameDir, "data.win"));
+            UndertaleGameObject o = after.GameObjects.ByName(child);
+            Assert.NotNull(o);
+            Assert.Equal(parent, o.ParentId?.Name?.Content);
+            UndertaleGameObject.Event collision = Assert.Single(o.Events[(int)EventType.Collision]);
+            Assert.Equal(parent, after.GameObjects[(int)collision.EventSubtype].Name.Content);
+            Assert.Single(after.GameObjects, g => g.Name?.Content == parent);
+        }
+        finally
+        {
+            TryDelete(root);
+            TryDelete(gameDir);
+        }
+    }
+
     private static void TryDelete(string dir)
     {
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }

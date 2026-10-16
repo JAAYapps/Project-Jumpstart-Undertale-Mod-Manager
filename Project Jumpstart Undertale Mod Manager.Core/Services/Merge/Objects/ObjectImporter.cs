@@ -87,8 +87,7 @@ public static class ObjectImporter
         UndertaleGameObject obj;
         if (create)
         {
-            obj = new UndertaleGameObject { Name = data.Strings.MakeString(name) };
-            data.GameObjects.Add(obj);
+            obj = CreateEmpty(data, name);
         }
         else
         {
@@ -134,6 +133,13 @@ public static class ObjectImporter
         // (gml_Object_<name>_<type>_<subtype>) if absent. The code/ importer
         // then compiles the GML into that code entry. We only ensure presence.
         ParseEvents(data, obj, json.Events);
+    }
+
+    public static UndertaleGameObject CreateEmpty(UndertaleData data, string name)
+    {
+        var obj = new UndertaleGameObject { Name = data.Strings.MakeString(name) };
+        data.GameObjects.Add(obj);
+        return obj;
     }
 
     private static UndertaleSprite ResolveSprite(UndertaleData data, string sprite, string obj, string field)
