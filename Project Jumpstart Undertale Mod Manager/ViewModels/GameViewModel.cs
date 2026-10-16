@@ -432,7 +432,7 @@ public partial class GameViewModel : ViewModelBase
                 if (m.IsEnabled)
                     modList.Add(new ModSource(m.Name, m.ModDirectory));
 
-            var result = await _mergeService.ApplyAsync(mergeDir, modList);
+            var result = await _mergeService.ApplyAsync(mergeDir, modList, tempGameDir);
 
             string report = MergeReport.Format(result);
             MainWindowViewModel.SendLog(report);

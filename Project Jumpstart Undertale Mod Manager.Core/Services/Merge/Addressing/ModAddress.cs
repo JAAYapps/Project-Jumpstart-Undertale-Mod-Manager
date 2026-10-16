@@ -54,6 +54,8 @@ public sealed record ModAddress(
 {
     public bool IsRawFile => Category == AssetCategory.Files;
 
+    public bool IsShared => IsRawFile && Route.Count == 1 && Route[0].Equals("shared", StringComparison.OrdinalIgnoreCase);
+
     // Convenience: by our convention the container is the LAST route segment
     // (data.win / audiogroup1 / files); the chapter (if any) is everything
     // before it. The semantic resolver may interpret differently, but these

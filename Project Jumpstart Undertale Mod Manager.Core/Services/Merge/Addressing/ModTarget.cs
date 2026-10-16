@@ -46,6 +46,8 @@ public sealed record ModTarget(string Game, string? Chapter)
     {
         if (!addr.Game.Equals(Game, StringComparison.OrdinalIgnoreCase))
             return false;
+        if (addr.IsShared)
+            return true;
 
         IReadOnlyList<string> chapter = addr.RoutePrefix;
         return Chapter is null

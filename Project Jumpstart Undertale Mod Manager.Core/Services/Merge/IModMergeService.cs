@@ -57,5 +57,5 @@ public interface IModMergeService
     /// naming the failing mod and does NOT mutate. On success, data.win (and any
     /// touched audiogroup .dat) are rewritten in place inside gameDir.
     /// </summary>
-    Task<MergeResult> ApplyAsync(string gameDir, IReadOnlyList<ModSource> mods);
+    Task<MergeResult> ApplyAsync(string gameDir, IReadOnlyList<ModSource> mods, string? gameRoot = null);
 }

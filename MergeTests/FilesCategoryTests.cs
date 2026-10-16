@@ -62,6 +62,88 @@ public class FilesCategoryTests
 
     private static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
+    private static string SharedFiles(string mod, string dataWin)
+    {
+        string game = Path.GetRelativePath(mod, TestPaths.ModRoot(mod, dataWin)).Split(Path.DirectorySeparatorChar)[0];
+        return Path.Combine(mod, game, "shared", "files");
+    }
+
+    private static string InstallWithChapter(Sandbox box, out string chapterDir)
+    {
+        string install = Path.Combine(box.Root, "install");
+        chapterDir = Path.Combine(install, "chapter_dir");
+        Directory.CreateDirectory(chapterDir);
+        File.Move(Path.Combine(box.GameDir, "data.win"), Path.Combine(chapterDir, "data.win"));
+        return install;
+    }
+
+    [Fact]
+    public async Task Shared_files_go_to_the_game_root_and_files_go_beside_data_win()
+    {
+        string? src = TestPaths.DataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        using var box = new Sandbox(src);
+        string install = InstallWithChapter(box, out string chapterDir);
+        string mod = box.Mod("SharedMod");
+        Write(Path.Combine(SharedFiles(mod, src), "pjum_shared.txt"), "shared file");
+        Write(Path.Combine(SharedFiles(mod, src), "lang", "pjum_shared.json"), "{ \"shared\": true }");
+        Write(Path.Combine(TestPaths.ModRoot(mod, src), "files", "pjum_here.txt"), "here");
+
+        MergeResult result = await new ModMergeService(new DirectDataService())
+            .ApplyAsync(chapterDir, new List<ModSource> { new("SharedMod", mod) }, install);
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+
+        Assert.True(result.Success, result.Reason);
+        Assert.Equal("shared file", File.ReadAllText(Path.Combine(install, "pjum_shared.txt")));
+        Assert.Equal("{ \"shared\": true }", File.ReadAllText(Path.Combine(install, "lang", "pjum_shared.json")));
+        Assert.Equal("here", File.ReadAllText(Path.Combine(chapterDir, "pjum_here.txt")));
+        Assert.False(File.Exists(Path.Combine(chapterDir, "pjum_shared.txt")));
+        Assert.False(File.Exists(Path.Combine(install, "pjum_here.txt")));
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public async Task Shared_files_without_a_game_root_go_beside_data_win()
+    {
+        string? src = TestPaths.DataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        using var box = new Sandbox(src);
+        string mod = box.Mod("SharedMod");
+        Write(Path.Combine(SharedFiles(mod, src), "pjum_shared.txt"), "shared file");
+
+        MergeResult result = await new ModMergeService(new DirectDataService())
+            .ApplyAsync(box.GameDir, new List<ModSource> { new("SharedMod", mod) });
+
+        Assert.True(result.Success, result.Reason);
+        Assert.Equal("shared file", File.ReadAllText(Path.Combine(box.GameDir, "pjum_shared.txt")));
+    }
+
+    [Fact]
+    public async Task A_shared_file_that_replaces_the_merged_data_win_fails_and_changes_nothing()
+    {
+        string? src = TestPaths.DataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        using var box = new Sandbox(src);
+        string install = InstallWithChapter(box, out string chapterDir);
+        string mod = box.Mod("BadMod");
+        Write(Path.Combine(SharedFiles(mod, src), "chapter_dir", "data.win"), "not a game");
+        Write(Path.Combine(SharedFiles(mod, src), "pjum_should_not_copy.txt"), "x");
+        string before = Hash(Path.Combine(chapterDir, "data.win"));
+
+        MergeResult result = await new ModMergeService(new DirectDataService())
+            .ApplyAsync(chapterDir, new List<ModSource> { new("BadMod", mod) }, install);
+
+        Assert.False(result.Success);
+        Assert.Equal("BadMod", result.FailedMod);
+        Assert.Contains("shared/files/chapter_dir/data.win", result.Reason);
+        Assert.Contains("rewrites", result.Reason);
+        Assert.Equal(before, Hash(Path.Combine(chapterDir, "data.win")));
+        Assert.False(File.Exists(Path.Combine(install, "pjum_should_not_copy.txt")));
+    }
+
     [Fact]
     public async Task Files_are_copied_beside_data_win_keeping_their_folders()
     {
