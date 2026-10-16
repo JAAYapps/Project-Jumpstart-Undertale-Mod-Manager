@@ -48,6 +48,8 @@ public sealed record ModTarget(string Game, string? Chapter)
             return false;
         if (addr.IsShared)
             return true;
+        if (addr.InSharedFolder)
+            return false;
 
         IReadOnlyList<string> chapter = addr.RoutePrefix;
         return Chapter is null

@@ -89,6 +89,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             int accepted = 0;
             var misspelled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var otherGames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sharedNotFiles = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (string file in EnumerateModFiles(mod, manifests[mod.Name]))
             {
@@ -98,7 +99,9 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
                 if (target is not null && !target.Accepts(addr))
                 {
-                    if (target.LooksMisspelled(addr))
+                    if (addr.InSharedFolder && addr.Game.Equals(target.Game, StringComparison.OrdinalIgnoreCase))
+                        sharedNotFiles.Add($"{addr.Game}/{addr.Route[0]}/{addr.Category.ToString().ToLowerInvariant()}/");
+                    else if (target.LooksMisspelled(addr))
                         misspelled.Add(string.Join("/", addr.RoutePrefix));
                     else if (!addr.Game.Equals(target.Game, StringComparison.OrdinalIgnoreCase))
                         otherGames.Add(addr.Game);
@@ -125,6 +128,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 plan[key] = new PlannedAsset(addr, mod.Name, file);
             }
 
+            foreach (string folder in sharedNotFiles)
+                warnings.Add($"[{mod.Name}] folder '{folder}' was skipped: shared/ only holds files/ (copied into the game folder).");
             foreach (string folder in misspelled)
                 warnings.Add($"[{mod.Name}] folder '{target!.Game}/{folder}' is not a chapter name " +
                              "(expected nothing, or chapter + a number such as chapter2); its files were skipped.");

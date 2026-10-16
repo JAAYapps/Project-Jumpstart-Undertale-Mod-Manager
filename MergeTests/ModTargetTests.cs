@@ -58,11 +58,14 @@ public class ModTargetTests
     [InlineData("deltarune", null, "deltarune/data.win/sprites/spr_x/0.png", true)]
     [InlineData("deltarune", null, "deltarune/chapter2/data.win/sprites/spr_x/0.png", false)]
     [InlineData("deltarune", null, "deltarune/shared/files/lang/x.json", true)]
+    [InlineData("deltarune", null, "deltarune/shared/sprites/spr_x/0.png", false)]
+    [InlineData("deltarune", null, "deltarune/shared/sounds/snd_x.ogg", false)]
     // target undertale
     [InlineData("undertale", null, "undertale/data.win/sprites/spr_x/0.png", true)]
     [InlineData("undertale", null, "deltarune/chapter2/data.win/sprites/spr_x/0.png", false)]
     [InlineData("undertale", null, "undertale_yellow/data.win/sprites/spr_x/0.png", false)]
     [InlineData("undertale", null, "deltarune/shared/files/lang/x.json", false)]
+    [InlineData("undertale", null, "undertale/shared/sprites/spr_x/0.png", false)]
     [InlineData("undertale_yellow", null, "undertale_yellow/data.win/sprites/spr_x/0.png", true)]
     [InlineData("undertale_yellow", null, "undertale/data.win/sprites/spr_x/0.png", false)]
     public void Accepts_only_the_same_game_and_chapter(string game, string? chapter, string path, bool expected)

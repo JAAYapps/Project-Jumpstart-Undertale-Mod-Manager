@@ -121,6 +121,34 @@ public class FilesCategoryTests
     }
 
     [Fact]
+    public async Task Shared_folders_other_than_files_are_skipped_with_a_warning()
+    {
+        string? src = TestPaths.DataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        using var box = new Sandbox(src);
+        string mod = box.Mod("SharedMod");
+        string shared = Path.GetDirectoryName(SharedFiles(mod, src))!;
+        UndertaleData before = await new DirectDataService().LoadAsync(src);
+        string sprite = before.Sprites.First(s => s?.Textures.Count > 0 && s.Textures[0]?.Texture is not null).Name.Content;
+        Write(Path.Combine(shared, "sprites", sprite, "0.png"), "not read");
+        Write(Path.Combine(shared, "sounds", "snd_pjum_shared.ogg"), "not read");
+        Write(Path.Combine(SharedFiles(mod, src), "pjum_shared.txt"), "shared file");
+
+        MergeResult result = await new ModMergeService(new DirectDataService())
+            .ApplyAsync(box.GameDir, new List<ModSource> { new("SharedMod", mod) });
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+
+        Assert.True(result.Success, result.Reason);
+        Assert.Equal("shared file", File.ReadAllText(Path.Combine(box.GameDir, "pjum_shared.txt")));
+        Assert.Contains(result.Warnings, w => w.Contains("[SharedMod]") && w.Contains("/shared/sprites/'") && w.Contains("only holds files/"));
+        Assert.Contains(result.Warnings, w => w.Contains("[SharedMod]") && w.Contains("/shared/sounds/'"));
+        Assert.Equal(2, result.Warnings.Count);
+        UndertaleData after = await new DirectDataService().LoadAsync(Path.Combine(box.GameDir, "data.win"));
+        Assert.Null(after.Sounds.ByName("snd_pjum_shared"));
+    }
+
+    [Fact]
     public async Task A_shared_file_that_replaces_the_merged_data_win_fails_and_changes_nothing()
     {
         string? src = TestPaths.DataWin;
