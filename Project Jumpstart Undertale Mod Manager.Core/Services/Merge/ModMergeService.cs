@@ -34,13 +34,36 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
         // === PHASE 1: dependency check (hard-fail) ==========================
         var presentNames = new HashSet<string>(mods.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+        var loadPosition = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < mods.Count; i++)
+            loadPosition.TryAdd(mods[i].Name, i);
+        var orderWarnings = new List<string>();
         foreach (ModSource mod in mods)
         {
-            foreach (string dep in manifests[mod.Name].Requires.Keys)
+            foreach ((string dep, string rule) in manifests[mod.Name].Requires)
             {
                 if (!presentNames.Contains(dep))
                     return MergeResult.Fail(mod.Name,
                         $"requires '{dep}', which is not in the mod set. Add it or remove {mod.Name}.");
+
+                if (!VersionRule.IsAny(rule))
+                {
+                    if (!VersionRule.TryParse(rule, out VersionRule? wanted))
+                        return MergeResult.Fail(mod.Name,
+                            $"can't read the version rule '{rule}' for '{dep}'. Use a version such as 1.0.0, optionally after >=, >, <= or <.");
+
+                    ModSource depMod = mods[loadPosition[dep]];
+                    string installed = manifests[depMod.Name].Version;
+                    if (!VersionRule.TryParseVersion(installed, out int[]? have))
+                        return MergeResult.Fail(mod.Name,
+                            $"requires {dep} {rule.Trim()}, but {depMod.Name} has no readable version ('{installed}').");
+                    if (!wanted.Allows(have))
+                        return MergeResult.Fail(mod.Name,
+                            $"requires {dep} {rule.Trim()}, but {installed} is enabled.");
+                }
+
+                if (loadPosition[dep] > loadPosition[mod.Name])
+                    orderWarnings.Add($"[{mod.Name}] requires '{dep}', but '{dep}' loads after it, so '{dep}' wins any asset both change. Move '{dep}' earlier in the load order.");
             }
         }
 
@@ -50,7 +73,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         // === PHASE 2b: which game + chapter is this data.win? ===============
         // Read from the data itself. A mod file addressed to another game or
         // chapter is SKIPPED, not failed — one mod may cover several chapters.
-        var warnings = new List<string>();
+        var warnings = new List<string>(orderWarnings);
         ModTarget? target = ModTarget.FromData(data);
         if (target is null)
             warnings.Add("data.win has no game name; mod paths were not checked against the game.");

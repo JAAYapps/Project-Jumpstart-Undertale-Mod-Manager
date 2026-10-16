@@ -160,6 +160,82 @@ public class ModMergeServiceTests
         }
     }
 
+    private static string WriteManifestOnly(string root, string folder, string json)
+    {
+        string dir = Path.Combine(root, folder);
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "mod.json"), json);
+        return dir;
+    }
+
+    [Theory]
+    [InlineData(">=2.0.0", "but 1.0.0 is enabled")]
+    [InlineData("latest", "can't read the version rule 'latest'")]
+    public async Task Dependency_with_the_wrong_version_hardFails_namingTheMod(string rule, string expected)
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        string root = Path.Combine(Path.GetTempPath(), "pjum_dep_" + Guid.NewGuid().ToString("N"));
+        string gameDir = PrepareGameDir(src);
+
+        try
+        {
+            string baseMod = WriteManifestOnly(root, "SonicBase", "{ \"name\": \"SonicBase\", \"version\": \"1.0.0\" }");
+            string modC = WriteManifestOnly(root, "ModC",
+                $"{{ \"name\": \"ModC\", \"version\": \"1.0.0\", \"requires\": {{ \"SonicBase\": \"{rule}\" }} }}");
+            string dataWin = Path.Combine(gameDir, "data.win");
+            DateTime before = File.GetLastWriteTimeUtc(dataWin);
+
+            MergeResult result = await new ModMergeService(new DirectDataService())
+                .ApplyAsync(gameDir, new List<ModSource> { new("SonicBase", baseMod), new("ModC", modC) });
+            _out.WriteLine("hard-fail reason: " + result.Reason);
+
+            Assert.False(result.Success);
+            Assert.Equal("ModC", result.FailedMod);
+            Assert.Contains(expected, result.Reason);
+            Assert.Equal(before, File.GetLastWriteTimeUtc(dataWin));
+        }
+        finally
+        {
+            TryDelete(root);
+            TryDelete(gameDir);
+        }
+    }
+
+    [Fact]
+    public async Task Dependency_loading_after_its_dependent_is_a_warning()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        string root = Path.Combine(Path.GetTempPath(), "pjum_dep_" + Guid.NewGuid().ToString("N"));
+        string gameDir = PrepareGameDir(src);
+
+        try
+        {
+            string baseMod = WriteManifestOnly(root, "sonicbase", "{ \"name\": \"sonicbase\", \"version\": \"1.4.2\" }");
+            string modC = WriteManifestOnly(root, "ModC",
+                "{ \"name\": \"ModC\", \"version\": \"1.0.0\", \"requires\": { \"SonicBase\": \">=1.0.0\" } }");
+
+            MergeResult inOrder = await new ModMergeService(new DirectDataService())
+                .ApplyAsync(gameDir, new List<ModSource> { new("sonicbase", baseMod), new("ModC", modC) });
+            MergeResult reversed = await new ModMergeService(new DirectDataService())
+                .ApplyAsync(gameDir, new List<ModSource> { new("ModC", modC), new("sonicbase", baseMod) });
+            foreach (string w in reversed.Warnings) _out.WriteLine("WARN: " + w);
+
+            Assert.True(inOrder.Success, inOrder.Reason);
+            Assert.DoesNotContain(inOrder.Warnings, w => w.Contains("loads after it"));
+            Assert.True(reversed.Success, reversed.Reason);
+            Assert.Contains(reversed.Warnings, w => w.Contains("[ModC]") && w.Contains("'SonicBase' loads after it"));
+        }
+        finally
+        {
+            TryDelete(root);
+            TryDelete(gameDir);
+        }
+    }
+
     private static void TryDelete(string dir)
     {
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
