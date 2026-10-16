@@ -8,5 +8,5 @@ public interface IGameLocatorService
     IReadOnlyList<string> MissingGames { get; }
     string AddCustomGame(string path);
     GameEntry? GetEntry(string path);
-    void SaveChoices(string path, string? executable, string? dataFile);
+    void SaveChoices(string path, string? executable, string? dataFile, string? runner, string? proton);
 }

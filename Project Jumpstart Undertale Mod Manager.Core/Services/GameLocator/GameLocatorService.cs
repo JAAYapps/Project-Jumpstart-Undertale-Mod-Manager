@@ -93,7 +93,7 @@ public class GameLocatorService : IGameLocatorService
 
     public GameEntry? GetEntry(string path) => FindEntry(LoadEntries(), path);
 
-    public void SaveChoices(string path, string? executable, string? dataFile)
+    public void SaveChoices(string path, string? executable, string? dataFile, string? runner, string? proton)
     {
         var entries = LoadEntries();
         GameEntry? entry = FindEntry(entries, path);
@@ -104,6 +104,8 @@ public class GameLocatorService : IGameLocatorService
         }
         entry.Executable = string.IsNullOrEmpty(executable) ? null : executable;
         entry.DataFile = string.IsNullOrEmpty(dataFile) ? null : dataFile;
+        entry.Runner = string.IsNullOrEmpty(runner) ? null : runner;
+        entry.Proton = string.IsNullOrEmpty(proton) ? null : proton;
         SaveEntries(entries);
     }
 

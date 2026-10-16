@@ -17,7 +17,7 @@ public class LauncherService : ILauncherService
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
-    public async Task LaunchAndWaitAsync(string gameDir, string exeName, string dataName, Action<string> log, CancellationToken ct = default)
+    public async Task LaunchAndWaitAsync(string gameDir, string exeName, string dataName, Action<string> log, LaunchOptions? options = null, CancellationToken ct = default)
     {
         log($"Launching '{exeName}'...");
         string exePath  = Path.Combine(gameDir, exeName);
@@ -30,9 +30,34 @@ public class LauncherService : ILauncherService
         };
 
         bool isWindowsExe = exePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
-        bool usingWine = OperatingSystem.IsLinux() && isWindowsExe;
-        
-        if (usingWine)
+        string runner = (options?.Runner ?? "Automatic").ToLowerInvariant();
+        if (!OperatingSystem.IsLinux())
+            runner = "native";
+        else if (runner == "automatic")
+            runner = isWindowsExe ? "wine" : "native";
+        bool usingWine = runner == "wine";
+        bool usingProton = runner == "proton";
+        string protonScript = Path.Combine(options?.ProtonDirectory ?? "", "proton");
+
+        if (usingProton)
+        {
+            if (options?.ProtonDirectory is null || !File.Exists(protonScript))
+                throw new InvalidOperationException("Proton was chosen for this game, but no Proton install was found. Pick one under Manager Config, or install Proton through Steam.");
+            if (string.IsNullOrEmpty(options.CompatDataDirectory))
+                throw new InvalidOperationException("Proton was chosen for this game, but there is no Wine folder to run it in.");
+
+            Directory.CreateDirectory(options.CompatDataDirectory);
+            if (options.SteamAppId is not null)
+                File.WriteAllText(Path.Combine(gameDir, "steam_appid.txt"), options.SteamAppId);
+
+            psi.FileName = protonScript;
+            psi.ArgumentList.Add("runinprefix");
+            psi.ArgumentList.Add(exePath);
+            psi.Environment["STEAM_COMPAT_DATA_PATH"] = options.CompatDataDirectory;
+            psi.Environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = options.SteamClientDirectory ?? "";
+            log($"Using {Path.GetFileName(options.ProtonDirectory)} with Wine folder {options.CompatDataDirectory}");
+        }
+        else if (usingWine)
         {
             psi.FileName = "wine";               // needs wine on PATH
             psi.ArgumentList.Add(exePath);
@@ -59,11 +84,31 @@ public class LauncherService : ILauncherService
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            string hint = usingWine
-                ? "Is wine installed and on PATH?"
-                : $"Check that '{exePath}' exists and is executable.";
+            string hint = usingProton
+                ? $"Check that '{protonScript}' exists and is executable."
+                : usingWine
+                    ? "Is wine installed and on PATH?"
+                    : $"Check that '{exePath}' exists and is executable.";
             throw new InvalidOperationException(
                 $"Could not start '{psi.FileName}'. {hint}", ex);
+        }
+
+        if (usingProton)
+        {
+            await proc.WaitForExitAsync(ct);
+            string wineserver = Path.Combine(options!.ProtonDirectory!, "files", "bin", "wineserver");
+            string prefix = Path.Combine(options.CompatDataDirectory!, "pfx");
+            if (File.Exists(wineserver) && Directory.Exists(prefix))
+            {
+                var wait = new ProcessStartInfo(wineserver) { UseShellExecute = false };
+                wait.ArgumentList.Add("-w");
+                wait.Environment["WINEPREFIX"] = prefix;
+                using Process? waiting = Process.Start(wait);
+                if (waiting is not null)
+                    await waiting.WaitForExitAsync(ct);
+            }
+            log($"'{exeName}' exited...");
+            return;
         }
 
         var procName = proc.ProcessName; 

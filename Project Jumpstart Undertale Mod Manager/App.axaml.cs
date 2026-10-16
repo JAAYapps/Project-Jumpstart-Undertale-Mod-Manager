@@ -10,6 +10,8 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.SteamScanner;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
 using Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
 using Project_Jumpstart_Undertale_Mod_Manager.Views;
@@ -35,6 +37,8 @@ public partial class App : Application
         collection.AddSingleton<ILauncherService, LauncherService>();
         collection.AddSingleton<IDataService, UndertaleDataService>();
         collection.AddSingleton<IModMergeService, ModMergeService>();
+        collection.AddSingleton<ISteamScanner, CrossPlatformSteamScanner>();
+        collection.AddSingleton<IProtonLocatorService, ProtonLocatorService>();
         
         Services = collection.BuildServiceProvider();
 

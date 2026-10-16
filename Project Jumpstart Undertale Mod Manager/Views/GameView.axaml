@@ -89,6 +89,18 @@
                           SelectedItem="{Binding SelectedDataFile}"
                           Width="400"/>
 
+                <TextBlock Text="Run With:" FontWeight="Bold" Margin="0,10,0,0" IsVisible="{Binding IsLinux}"/>
+                <ComboBox ItemsSource="{Binding Runners}"
+                          SelectedItem="{Binding SelectedRunner}"
+                          Width="400"
+                          IsVisible="{Binding IsLinux}"/>
+
+                <TextBlock Text="Proton Version:" FontWeight="Bold" Margin="0,10,0,0" IsVisible="{Binding IsProtonChosen}"/>
+                <ComboBox ItemsSource="{Binding ProtonVersions}"
+                          SelectedItem="{Binding SelectedProton}"
+                          Width="400"
+                          IsVisible="{Binding IsProtonChosen}"/>
+
             </StackPanel>
         </TabItem>
     </TabControl>

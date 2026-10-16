@@ -16,6 +16,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Reporting;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
@@ -30,12 +31,24 @@ public partial class GameViewModel : ViewModelBase
 
     private readonly IGameLocatorService _gameLocator;
 
+    private readonly IProtonLocatorService _protonLocator;
+
+    private const string Automatic = "Automatic";
+
     private bool _choicesLoaded;
     
     public string GameName => new DirectoryInfo(GameDirectory).Name;
     
     public ObservableCollection<string> Executables { get; } = [];
     public ObservableCollection<string> DataFiles { get; } = [];
+
+    public ObservableCollection<string> Runners { get; } = [Automatic, "Wine", "Proton", "Native"];
+
+    public ObservableCollection<string> ProtonVersions { get; } = [Automatic];
+
+    public bool IsLinux => OperatingSystem.IsLinux();
+
+    public bool IsProtonChosen => IsLinux && SelectedRunner == "Proton";
     
     public ObservableCollection<ModItem> Mods { get; } = [];
 
@@ -52,6 +65,13 @@ public partial class GameViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string SelectedDataFile { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsProtonChosen))]
+    public partial string SelectedRunner { get; set; } = Automatic;
+
+    [ObservableProperty]
+    public partial string SelectedProton { get; set; } = Automatic;
     
     [ObservableProperty]
     public partial string GameDirectory { get; set; }
@@ -59,13 +79,14 @@ public partial class GameViewModel : ViewModelBase
     [ObservableProperty]
     public partial ModItem? SelectedMod { get; set; }
 
-    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, string gamePath)
+    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, string gamePath)
     {
         GameDirectory = gamePath;
         _storageProvider = storageProvider;
         _launcherService = launcherService;
         _mergeService =  mergeService;
         _gameLocator = gameLocator;
+        _protonLocator = protonLocator;
         
         // Scan for executables
         var exes = Directory.GetFiles(gamePath, "*.exe");
@@ -86,6 +107,13 @@ public partial class GameViewModel : ViewModelBase
         GameEntry? saved = gameLocator.GetEntry(gamePath);
         if (saved?.Executable is string savedExe && Executables.Contains(savedExe)) SelectedExecutable = savedExe;
         if (saved?.DataFile is string savedData && DataFiles.Contains(savedData)) SelectedDataFile = savedData;
+        if (IsLinux)
+        {
+            foreach (ProtonInstall install in protonLocator.FindProtonInstalls())
+                ProtonVersions.Add(install.Name);
+        }
+        if (saved?.Runner is string savedRunner && Runners.Contains(savedRunner)) SelectedRunner = savedRunner;
+        if (saved?.Proton is string savedProton && ProtonVersions.Contains(savedProton)) SelectedProton = savedProton;
         _choicesLoaded = true;
         
         DiscoverMergeTargets();
@@ -94,16 +122,38 @@ public partial class GameViewModel : ViewModelBase
         RefreshMods();
     }
     
-    partial void OnSelectedExecutableChanged(string value)
+    partial void OnSelectedExecutableChanged(string value) => SaveChoices();
+
+    partial void OnSelectedDataFileChanged(string value) => SaveChoices();
+
+    partial void OnSelectedRunnerChanged(string value) => SaveChoices();
+
+    partial void OnSelectedProtonChanged(string value) => SaveChoices();
+
+    private void SaveChoices()
     {
         if (_choicesLoaded)
-            _gameLocator.SaveChoices(GameDirectory, SelectedExecutable, SelectedDataFile);
+            _gameLocator.SaveChoices(GameDirectory, SelectedExecutable, SelectedDataFile, SelectedRunner, SelectedProton);
     }
 
-    partial void OnSelectedDataFileChanged(string value)
+    private LaunchOptions BuildLaunchOptions()
     {
-        if (_choicesLoaded)
-            _gameLocator.SaveChoices(GameDirectory, SelectedExecutable, SelectedDataFile);
+        if (SelectedRunner != "Proton")
+            return new LaunchOptions(SelectedRunner);
+
+        string? appId = _protonLocator.SteamAppIdFor(GameDirectory);
+        var installs = _protonLocator.FindProtonInstalls();
+        ProtonInstall? steamChoice = appId is null ? null : _protonLocator.SteamChoiceFor(appId);
+        ProtonInstall? proton = SelectedProton == Automatic
+            ? steamChoice
+              ?? installs.FirstOrDefault(i => i.Name == "Proton - Experimental")
+              ?? installs.FirstOrDefault()
+            : installs.FirstOrDefault(i => i.Name == SelectedProton);
+
+        bool sameProtonAsSteam = steamChoice is not null && proton is not null && steamChoice.Directory == proton.Directory;
+        string compatData = (sameProtonAsSteam ? _protonLocator.CompatDataFor(GameDirectory) : null)
+                            ?? Path.Combine(AppContext.BaseDirectory, "prefixes", GameName);
+        return new LaunchOptions("Proton", proton?.Directory, compatData, _protonLocator.SteamRoot, appId);
     }
 
     [RelayCommand]
@@ -404,7 +454,7 @@ public partial class GameViewModel : ViewModelBase
             }
 
             // Launch and wait for the process.
-            await _launcherService.LaunchAndWaitAsync(tempGameDir, SelectedExecutable, "data.win", MainWindowViewModel.SendLog);
+            await _launcherService.LaunchAndWaitAsync(tempGameDir, SelectedExecutable, "data.win", MainWindowViewModel.SendLog, BuildLaunchOptions());
         }
         catch (Exception ex)
         {
