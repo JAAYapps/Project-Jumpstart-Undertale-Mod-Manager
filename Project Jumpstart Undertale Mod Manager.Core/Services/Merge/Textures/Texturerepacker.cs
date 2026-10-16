@@ -147,7 +147,9 @@ public sealed class TextureRepacker
             });
             
             // 5. Rebuild the graph from the packed atlases.
+            warnings.AddRange(packer.Errors);
             var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, warnings);
+            KeepUnpackedOriginals(data, warnings);
 
             // Repoint TextureGroupInfo (TGIN) at the freshly-built pages. The old page
             // objects were Cleared at step 3, so every group still holds dangling refs to
@@ -310,6 +312,32 @@ public sealed class TextureRepacker
         }
 
         return lastTextPageItem + 1;
+    }
+
+    private static void KeepUnpackedOriginals(UndertaleData data, List<string> warnings)
+    {
+        var live = new HashSet<UndertaleTexturePageItem>(data.TexturePageItems);
+        var livePages = new HashSet<UndertaleEmbeddedTexture>(data.EmbeddedTextures);
+
+        void Keep(UndertaleTexturePageItem? tex, string owner)
+        {
+            if (tex is null || !live.Add(tex)) return;
+            data.TexturePageItems.Add(tex);
+            if (tex.TexturePage is not null && livePages.Add(tex.TexturePage))
+                data.EmbeddedTextures.Add(tex.TexturePage);
+            warnings.Add($"{owner} was not repacked, so it keeps its original texture page.");
+        }
+
+        foreach (UndertaleSprite s in data.Sprites)
+        {
+            if (s is null) continue;
+            for (int i = 0; i < s.Textures.Count; i++)
+                Keep(s.Textures[i]?.Texture, $"Sprite '{s.Name?.Content}' frame {i}");
+        }
+        foreach (UndertaleBackground b in data.Backgrounds)
+            if (b is not null) Keep(b.Texture, $"Background '{b.Name?.Content}'");
+        foreach (UndertaleFont f in data.Fonts)
+            if (f is not null) Keep(f.Texture, $"Font '{f.Name?.Content}'");
     }
 
     private static string? ResolveAssetType(string stripped, Dictionary<string, string> types, List<string> warnings)
@@ -529,7 +557,7 @@ public sealed class TextureRepacker
     {
         private List<TextureInfo> SourceTextures = [];
         private readonly StringWriter Log = new();
-        private readonly StringWriter Error = new();
+        public readonly List<string> Errors = [];
         private int Padding;
         private int AtlasSize;
         public bool DebugMode;
@@ -616,7 +644,7 @@ public sealed class TextureRepacker
                 }
                 else
                 {
-                    Error.WriteLine($"{fi.FullName} is too large to fit in the atlas. Skipping!");
+                    Errors.Add($"Image '{Path.GetFileNameWithoutExtension(fi.Name)}' is {width}x{height}, bigger than a {AtlasSize}x{AtlasSize} texture page. Skipped.");
                 }
             }
         }

@@ -180,6 +180,64 @@ public class RepackerTests
         }
     }
 
+    [Fact]
+    public async Task Repack_PictureBiggerThanPage_KeepsItsOriginalPage()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src))
+        {
+            _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping.");
+            return;
+        }
+
+        UndertaleData data = Load(src);
+        UndertaleSprite sprite = data.Sprites
+            .Where(s => s?.Textures.Count > 0 && s.Textures[0]?.Texture is not null)
+            .MaxBy(s => Math.Max(s.Textures[0].Texture.BoundingWidth, s.Textures[0].Texture.BoundingHeight));
+        Assert.NotNull(sprite);
+        UndertaleTexturePageItem original = sprite.Textures[0].Texture;
+        UndertaleEmbeddedTexture originalPage = original.TexturePage;
+
+        string emptyOverrides = Path.Combine(Path.GetTempPath(), "pjum_big_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(emptyOverrides);
+        string probe = Path.Combine(emptyOverrides, "probe.png");
+        string outPath = Path.Combine(Path.GetTempPath(), "pjum_big_" + Guid.NewGuid().ToString("N") + ".win");
+
+        try
+        {
+            using (var worker = new TextureWorker())
+                worker.ExportAsPNG(original, probe);
+            (int width, int height) = TextureWorker.GetImageSizeFromFile(probe);
+            File.Delete(probe);
+            int pageSize = Math.Max(width, height) - 1;
+            _out.WriteLine($"Sprite {sprite.Name.Content} frame 0 is {width}x{height}; repacking with {pageSize} pages.");
+
+            RepackResult result = await new TextureRepacker(atlasSize: pageSize).RepackAsync(data, emptyOverrides);
+            foreach (string w in result.Warnings)
+                _out.WriteLine("WARN: " + w);
+
+            Assert.Same(original, sprite.Textures[0].Texture);
+            Assert.Contains(original, data.TexturePageItems);
+            Assert.Contains(originalPage, data.EmbeddedTextures);
+            Assert.Empty(FindOrphanPageItemRefs(data));
+            Assert.Contains(result.Warnings, w => w.Contains($"'{sprite.Name.Content}_0'") && w.Contains("Skipped"));
+            Assert.Contains(result.Warnings, w => w.Contains($"Sprite '{sprite.Name.Content}' frame 0") && w.Contains("original texture page"));
+
+            Save(data, outPath);
+            UndertaleData after = Load(outPath);
+            UndertaleTexturePageItem reloaded = after.Sprites.ByName(sprite.Name.Content).Textures[0].Texture;
+            Assert.Equal(original.SourceWidth, reloaded.SourceWidth);
+            Assert.Equal(original.SourceHeight, reloaded.SourceHeight);
+            Assert.Equal(original.BoundingWidth, reloaded.BoundingWidth);
+            Assert.Equal(original.BoundingHeight, reloaded.BoundingHeight);
+        }
+        finally
+        {
+            TryDelete(emptyOverrides);
+            TryDeleteFile(outPath);
+        }
+    }
+
     private static void TryDelete(string dir)
     {
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
