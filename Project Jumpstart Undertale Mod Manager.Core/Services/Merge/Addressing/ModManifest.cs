@@ -16,7 +16,7 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 //     "name": "Sonic Lyoko Tale",
 //     "author": "Joshua",
 //     "version": "1.0.0",
-//     "integrityHash": null,            // RESERVED — see note below, not yet enforced
+//     "integrityHash": "sha256:...",   // written by Package mod, see note below
 //     "newAssets": {
 //       "sprites": { "spr_mynewthing": { "frames": 4 } },
 //       "code":    { "gml_Script_scr_x": {} },
@@ -24,10 +24,10 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 //     }
 //   }
 //
-// integrityHash: reserved slot, mirrors the bootloader's per-boot IntegrityHash.
-// When enforced later, the manager hashes the mod payload and rejects a
-// tampered/half-downloaded mod before it touches a data.win. Present now so the
-// idea isn't lost; the resolver ignores it for v1.
+// integrityHash: mirrors the bootloader's per-boot IntegrityHash. Package mod
+// hashes every file except mod.json (the manager rewrites that one) and writes
+// it here. Add Mod hashes the unzipped files again and asks before keeping a
+// mod that doesn't match, so a half-downloaded mod never reaches a data.win.
 // ---------------------------------------------------------------------------
 
 public sealed class ModManifest
@@ -41,7 +41,7 @@ public sealed class ModManifest
     [JsonPropertyName("version")]
     public string Version { get; set; } = "";
 
-    // RESERVED. Not verified in v1. See file header.
+    // Checked when a mod zip is added. See file header.
     [JsonPropertyName("integrityHash")]
     public string? IntegrityHash { get; set; }
 

@@ -1,9 +1,11 @@
+using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Project_Jumpstart_Undertale_Mod_Manager.Models;
@@ -42,10 +44,13 @@ public partial class ModItem : ObservableObject
 
     [JsonIgnore]
     public IStorageProvider? StorageProvider;
+
+    [JsonIgnore]
+    public Func<ModItem, Task>? Package;
     
     public void Init()
     {
-        ModDetails.Add(new ViewDetailsViewModel(Name, Author, Version, Category, ModDirectory, ImageFileName, EditDetails));
+        ModDetails.Add(new ViewDetailsViewModel(Name, Author, Version, Category, ModDirectory, ImageFileName, EditDetails, () => Package?.Invoke(this) ?? Task.CompletedTask));
         ModDetails.Add(new EditDetailsViewModel(Name, Author, Version, Category, ModDirectory, ImageFileName, StorageProvider, UpdateDetails, CancelChange));
         SelectModDetails = ModDetails[0];
     }

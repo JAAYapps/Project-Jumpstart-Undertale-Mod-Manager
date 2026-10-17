@@ -17,6 +17,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
 
@@ -35,6 +36,8 @@ public partial class GameViewModel : ViewModelBase
     private readonly IProtonLocatorService _protonLocator;
 
     private readonly ICodesService _codesService;
+
+    private readonly IModPackageService _packageService;
 
     private const string Automatic = "Automatic";
 
@@ -91,7 +94,7 @@ public partial class GameViewModel : ViewModelBase
     [ObservableProperty]
     public partial CodeItem? SelectedCode { get; set; }
 
-    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, ICodesService codesService, string gamePath)
+    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, ICodesService codesService, IModPackageService packageService, string gamePath)
     {
         GameDirectory = gamePath;
         _storageProvider = storageProvider;
@@ -100,6 +103,7 @@ public partial class GameViewModel : ViewModelBase
         _gameLocator = gameLocator;
         _protonLocator = protonLocator;
         _codesService = codesService;
+        _packageService = packageService;
         
         // Scan for executables
         var exes = Directory.GetFiles(gamePath, "*.exe");
@@ -212,6 +216,19 @@ public partial class GameViewModel : ViewModelBase
         try
         {
             string newModDir = ImportModZip(files[0].Path.LocalPath, ModsDirectory);
+            if (_packageService.CheckIntegrity(newModDir) == IntegrityResult.Mismatch)
+            {
+                string question = $"Some files in '{Path.GetFileName(files[0].Path.LocalPath)}' differ from what the mod's author packaged. " +
+                                  "The download may be broken, or someone changed the mod.\n\nAdd it anyway?";
+                ButtonResult answer = await (Application.Current?.ShowQuestion(question, MsBox.Avalonia.Enums.Icon.Warning, "Mod files don't match") ?? Task.FromResult(ButtonResult.No));
+                if (answer != ButtonResult.Yes)
+                {
+                    TryDeleteDir(newModDir);
+                    MainWindowViewModel.SendLog($"Did not add {Path.GetFileName(newModDir)}: its files don't match its integrityHash.", LogLevel.Warn);
+                    return;
+                }
+                MainWindowViewModel.SendLog($"Added {Path.GetFileName(newModDir)} although its files don't match its integrityHash.", LogLevel.Warn);
+            }
             MainWindowViewModel.SendLog($"Added mod {Path.GetFileName(newModDir)}");
             RefreshMods();
             SelectedMod = Mods.FirstOrDefault(m => m.ModDirectory == newModDir) ?? SelectedMod;
@@ -220,6 +237,31 @@ public partial class GameViewModel : ViewModelBase
         {
             MainWindowViewModel.SendLog(ex.Message, LogLevel.Error);
             await (Application.Current?.ShowError(ex.Message, "Could not add mod") ?? Task.FromResult(ButtonResult.Ok));
+        }
+    }
+
+    private async Task PackageModAsync(ModItem mod)
+    {
+        string suggested = string.Concat($"{mod.Name} {mod.Version}".Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + ".zip";
+        IStorageFile? file = await _storageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save the packaged mod",
+            SuggestedFileName = suggested,
+            DefaultExtension = "zip",
+            FileTypeChoices = [new FilePickerFileType("Mod archive") { Patterns = ["*.zip"] }]
+        });
+        if (file is null)
+            return;
+
+        try
+        {
+            string hash = _packageService.PackageMod(mod.ModDirectory, file.Path.LocalPath);
+            MainWindowViewModel.SendLog($"Packaged {mod.Name} to {file.Path.LocalPath} ({hash})");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            MainWindowViewModel.SendLog(ex.Message, LogLevel.Error);
+            await (Application.Current?.ShowError(ex.Message, "Could not package mod") ?? Task.FromResult(ButtonResult.Ok));
         }
     }
 
@@ -306,6 +348,7 @@ public partial class GameViewModel : ViewModelBase
                 {
                     mod.ModDirectory = folder;
                     mod.StorageProvider = _storageProvider;
+                    mod.Package = PackageModAsync;
                     mod.Init();
                     Mods.Add(mod);
                 }
@@ -426,7 +469,8 @@ public partial class GameViewModel : ViewModelBase
             Version = "1.0.0",
             Category = "Misc",
             ModDirectory = newModDir,
-            StorageProvider = _storageProvider
+            StorageProvider = _storageProvider,
+            Package = PackageModAsync
         };
         newMod.Init();
 

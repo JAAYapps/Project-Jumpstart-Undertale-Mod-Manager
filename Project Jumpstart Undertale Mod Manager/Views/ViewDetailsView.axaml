@@ -17,5 +17,6 @@
         </Border>
     
         <Button Content="Edit details" Command="{Binding EditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="10,5,10,5"/>
+        <Button Content="Package mod" Command="{Binding PackageCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="10,5,10,5"/>
     </StackPanel>
 </UserControl>
