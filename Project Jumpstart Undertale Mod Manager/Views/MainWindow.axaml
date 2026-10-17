@@ -54,6 +54,7 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <Button Content="Add Game" Command="{Binding AddGameCommand}"></Button>
+                <Button Content="Enable 1-Click" Command="{Binding EnableOneClickCommand}"/>
             </StackPanel>
         </Border>
         

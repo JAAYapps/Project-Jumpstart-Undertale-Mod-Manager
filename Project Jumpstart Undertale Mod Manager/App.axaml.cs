@@ -12,6 +12,8 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.OneClick;
+using Avalonia.Threading;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.SteamScanner;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
@@ -43,6 +45,7 @@ public partial class App : Application
         collection.AddSingleton<IProtonLocatorService, ProtonLocatorService>();
         collection.AddSingleton<ICodesService, CodesService>();
         collection.AddSingleton<IModPackageService, ModPackageService>();
+        collection.AddSingleton<IOneClickService, OneClickService>();
         
         Services = collection.BuildServiceProvider();
 
@@ -52,9 +55,19 @@ public partial class App : Application
             desktop.MainWindow = mainWindow;
             Current?.SetMessageMainWindow(mainWindow);
             // Create the ViewModel, mixing DI services with the window's StorageProvider
-            mainWindow.DataContext = ActivatorUtilities.CreateInstance<MainWindowViewModel>(
+            var mainViewModel = ActivatorUtilities.CreateInstance<MainWindowViewModel>(
                 Services, 
                 mainWindow.StorageProvider);
+            mainWindow.DataContext = mainViewModel;
+
+            OneClickPipe.Listen(link => Dispatcher.UIThread.Post(() =>
+            {
+                mainWindow.Activate();
+                _ = mainViewModel.HandleOneClickAsync(link);
+            }));
+            string? startLink = desktop.Args?.FirstOrDefault(a => a.StartsWith("pjum:", StringComparison.OrdinalIgnoreCase));
+            if (startLink is not null)
+                mainWindow.Opened += (_, _) => _ = mainViewModel.HandleOneClickAsync(startLink);
         }
 
         base.OnFrameworkInitializationCompleted();

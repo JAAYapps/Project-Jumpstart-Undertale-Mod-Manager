@@ -213,12 +213,17 @@ public partial class GameViewModel : ViewModelBase
         if (files.Count == 0)
             return;
 
+        await AddModFromZipAsync(files[0].Path.LocalPath, Path.GetFileName(files[0].Path.LocalPath));
+    }
+
+    public async Task AddModFromZipAsync(string zipPath, string shownName)
+    {
         try
         {
-            string newModDir = ImportModZip(files[0].Path.LocalPath, ModsDirectory);
+            string newModDir = ImportModZip(zipPath, ModsDirectory);
             if (_packageService.CheckIntegrity(newModDir) == IntegrityResult.Mismatch)
             {
-                string question = $"Some files in '{Path.GetFileName(files[0].Path.LocalPath)}' differ from what the mod's author packaged. " +
+                string question = $"Some files in '{shownName}' differ from what the mod's author packaged. " +
                                   "The download may be broken, or someone changed the mod.\n\nAdd it anyway?";
                 ButtonResult answer = await (Application.Current?.ShowQuestion(question, MsBox.Avalonia.Enums.Icon.Warning, "Mod files don't match") ?? Task.FromResult(ButtonResult.No));
                 if (answer != ButtonResult.Yes)
