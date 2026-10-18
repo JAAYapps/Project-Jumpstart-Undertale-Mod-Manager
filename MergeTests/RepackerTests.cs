@@ -287,6 +287,76 @@ public class RepackerTests
         }
     }
 
+    [Fact]
+    public async Task Repack_FullFrameOverride_ReplacesTheOriginalTrimBox()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src))
+        {
+            _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping.");
+            return;
+        }
+
+        UndertaleData data = Load(src);
+        UndertaleSprite sprite = data.Sprites.First(s =>
+            s?.Textures.Count > 0 && s.Textures[0]?.Texture is { } t &&
+            t.SourceWidth == t.TargetWidth && t.SourceHeight == t.TargetHeight &&
+            (t.TargetX > 0 || t.TargetY > 0) && t.BoundingWidth is > 2 and < 200 && t.BoundingHeight is > 2 and < 200);
+        UndertaleTexturePageItem item = sprite.Textures[0].Texture;
+        (ushort width, ushort height) box = (item.BoundingWidth, item.BoundingHeight);
+        _out.WriteLine($"Sprite {sprite.Name.Content} frame 0: drawn at ({item.TargetX},{item.TargetY}) {item.TargetWidth}x{item.TargetHeight} in a {box.width}x{box.height} frame.");
+
+        string overrides = Path.Combine(Path.GetTempPath(), "pjum_full_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(overrides);
+        string outPath = Path.Combine(Path.GetTempPath(), "pjum_full_" + Guid.NewGuid().ToString("N") + ".win");
+        try
+        {
+            using var picture = new MagickImage(MagickColors.Red, box.width, box.height);
+            picture.Write(Path.Combine(overrides, $"{sprite.Name.Content}_0.png"), MagickFormat.Png32);
+
+            RepackResult result = await new TextureRepacker().RepackAsync(data, overrides);
+            foreach (string w in result.Warnings)
+                _out.WriteLine("WARN: " + w);
+
+            Save(data, outPath);
+            UndertaleTexturePageItem after = Load(outPath).Sprites.ByName(sprite.Name.Content).Textures[0].Texture;
+            Assert.Equal((0, 0), ((int)after.TargetX, (int)after.TargetY));
+            Assert.Equal(box, (after.TargetWidth, after.TargetHeight));
+            Assert.Equal(box, (after.BoundingWidth, after.BoundingHeight));
+            Assert.Equal(box, (after.SourceWidth, after.SourceHeight));
+        }
+        finally
+        {
+            TryDelete(overrides);
+            TryDeleteFile(outPath);
+        }
+    }
+
+    [Fact]
+    public void Export_PictureDrawnAtAnotherShape_ComesOutAtItsDrawnSize()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src))
+        {
+            _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping.");
+            return;
+        }
+
+        UndertaleData data = Load(src);
+        UndertaleTexturePageItem item = data.Sprites.Where(s => s?.Textures.Count > 0).Select(s => s.Textures[0]?.Texture).First(t =>
+            t is not null && t.SourceWidth == t.TargetWidth && t.SourceHeight == t.TargetHeight && t.SourceWidth is > 8 and < 200 && t.SourceHeight is > 8 and < 200)!;
+        item.TargetWidth = (ushort)(item.SourceWidth - 3);
+        item.TargetHeight = (ushort)(item.SourceHeight + 5);
+        item.BoundingWidth = (ushort)Math.Max(item.BoundingWidth, item.TargetX + item.TargetWidth);
+        item.BoundingHeight = (ushort)Math.Max(item.BoundingHeight, item.TargetY + item.TargetHeight);
+
+        using var worker = new TextureWorker();
+        using IMagickImage<byte> image = worker.GetTextureFor(item, "frame");
+
+        Assert.Equal((uint)item.TargetWidth, image.Width);
+        Assert.Equal((uint)item.TargetHeight, image.Height);
+    }
+
     private static byte[] StoredPixels(UndertaleTexturePageItem item)
     {
         using var worker = new TextureWorker();

@@ -55,7 +55,7 @@ public class ModExtractTests : IDisposable
     private static byte[] FramePixels(UndertaleData data, string sprite)
     {
         using var worker = new TextureWorker();
-        using IMagickImage<byte> image = worker.GetTextureFor(data.Sprites.ByName(sprite).Textures[0].Texture, "frame");
+        using IMagickImage<byte> image = worker.GetTextureFor(data.Sprites.ByName(sprite).Textures[0].Texture, "frame", includePadding: true);
         return image.GetPixels().ToByteArray(PixelMapping.RGBA)!;
     }
 

@@ -102,6 +102,7 @@ public sealed class TextureRepacker
             // 1. Export every existing texture-backed asset, recording coords.
             var assetCoordinateDict = new Dictionary<string, int[]>();
             var assetTypeDict = new Dictionary<string, string>();
+            var overrideNames = new HashSet<string>();
             
             await ExportExistingAsync(data, texturesDir, assetCoordinateDict, assetTypeDict);
 
@@ -110,6 +111,7 @@ public sealed class TextureRepacker
             {
                 string dest = Path.Combine(texturesDir, Path.GetFileName(src));
                 File.Copy(src, dest, overwrite: true);
+                overrideNames.Add(Path.GetFileNameWithoutExtension(src));
             }
 
             // 3. Wipe existing pages/items, but keep the ones embedded images use.
@@ -149,7 +151,7 @@ public sealed class TextureRepacker
             
             // 5. Rebuild the graph from the packed atlases.
             warnings.AddRange(packer.Errors);
-            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, warnings);
+            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, overrideNames, warnings);
             KeepUnpackedOriginals(data, warnings);
 
             // Repoint TextureGroupInfo (TGIN) at the freshly-built pages. The old page
@@ -190,9 +192,8 @@ public sealed class TextureRepacker
 
         void Export(UndertaleTexturePageItem tex, string path)
         {
-            bool drawnLarger = tex.TargetWidth >= tex.SourceWidth && tex.TargetHeight >= tex.SourceHeight
-                               && (tex.TargetWidth > tex.SourceWidth || tex.TargetHeight > tex.SourceHeight);
-            if (!drawnLarger)
+            bool drawnAtOtherSize = tex.TargetWidth != tex.SourceWidth || tex.TargetHeight != tex.SourceHeight;
+            if (!drawnAtOtherSize)
             {
                 worker.ExportAsPNG(tex, path);
                 return;
@@ -269,6 +270,7 @@ public sealed class TextureRepacker
         string atlasDescPath,
         Dictionary<string, int[]> coords,
         Dictionary<string, string> types,
+        HashSet<string> overrideNames,
         List<string> warnings)
     {
         int lastTextPage = data.EmbeddedTextures.Count - 1;
@@ -314,7 +316,7 @@ public sealed class TextureRepacker
                 if (assetType is null)
                     continue; // unknown name — warning already recorded
 
-                RestoreTargetBounds(pageItem, stripped, n, coords);
+                RestoreTargetBounds(pageItem, stripped, n, coords, overrideNames.Contains(stripped));
 
                 switch (assetType)
                 {
@@ -390,9 +392,18 @@ public sealed class TextureRepacker
     }
 
     private static void RestoreTargetBounds(
-        UndertaleTexturePageItem tex, string name, Node n, Dictionary<string, int[]> coords)
+        UndertaleTexturePageItem tex, string name, Node n, Dictionary<string, int[]> coords, bool fromMod)
     {
-        if (coords.TryGetValue(name, out int[]? c))
+        if (coords.TryGetValue(name, out int[]? c) && fromMod && n.Bounds.Width == c[4] && n.Bounds.Height == c[5])
+        {
+            tex.TargetX = 0;
+            tex.TargetY = 0;
+            tex.TargetWidth = (ushort)c[4];
+            tex.TargetHeight = (ushort)c[5];
+            tex.BoundingWidth = (ushort)c[4];
+            tex.BoundingHeight = (ushort)c[5];
+        }
+        else if (c is not null)
         {
             tex.TargetX = (ushort)c[0];
             tex.TargetY = (ushort)c[1];

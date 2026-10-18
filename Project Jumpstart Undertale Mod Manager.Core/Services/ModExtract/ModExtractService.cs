@@ -179,7 +179,27 @@ public class ModExtractService(IDataService dataService) : IModExtractService
             if (item?.TexturePage is null)
                 return null;
             using IMagickImage<byte> image = worker.GetTextureFor(item, "compare");
-            return [.. BitConverter.GetBytes(image.Width), .. BitConverter.GetBytes(image.Height), .. image.GetPixels().ToByteArray(PixelMapping.RGBA)!];
+            return [.. BitConverter.GetBytes(image.Width), .. BitConverter.GetBytes(image.Height),
+                    .. BitConverter.GetBytes(item.TargetX), .. BitConverter.GetBytes(item.TargetY),
+                    .. BitConverter.GetBytes(item.BoundingWidth), .. BitConverter.GetBytes(item.BoundingHeight),
+                    .. image.GetPixels().ToByteArray(PixelMapping.RGBA)!];
+        }
+
+        private bool ExportFullFrame(TextureWorker worker, UndertaleTexturePageItem item, string path, string label)
+        {
+            IMagickImage<byte> image;
+            try
+            {
+                image = worker.GetTextureFor(item, label, includePadding: true);
+            }
+            catch (InvalidDataException)
+            {
+                _notConverted.Add($"{label} is drawn bigger than its frame ({item.TargetWidth}x{item.TargetHeight} in {item.BoundingWidth}x{item.BoundingHeight}), so it wasn't converted.");
+                return false;
+            }
+            using (image)
+                TextureWorker.SaveImageToFile(image, path);
+            return true;
         }
 
         private static bool SamePixels(byte[]? a, byte[]? b) => a is not null && b is not null && a.AsSpan().SequenceEqual(b);
@@ -200,8 +220,8 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                     UndertaleTexturePageItem? beforeItem = before is not null && i < before.Textures.Count ? before.Textures[i]?.Texture : null;
                     if (beforeItem is not null && SamePixels(Pixels(originalTextures, beforeItem), Pixels(moddedTextures, item)))
                         continue;
-                    moddedTextures.ExportAsPNG(item, FilePath("sprites", Path.Combine(name, i + ".png")));
-                    Count("sprite frames");
+                    if (ExportFullFrame(moddedTextures, item, FilePath("sprites", Path.Combine(name, i + ".png")), $"Sprite '{name}' frame {i}"))
+                        Count("sprite frames");
                 }
 
                 if (before is null)
@@ -234,8 +254,8 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                 }
                 if (SamePixels(Pixels(originalTextures, before.Texture), Pixels(moddedTextures, background.Texture)))
                     continue;
-                moddedTextures.ExportAsPNG(background.Texture, FilePath("backgrounds", name + ".png"));
-                Count("backgrounds");
+                if (ExportFullFrame(moddedTextures, background.Texture, FilePath("backgrounds", name + ".png"), $"Background '{name}'"))
+                    Count("backgrounds");
             }
         }
 
