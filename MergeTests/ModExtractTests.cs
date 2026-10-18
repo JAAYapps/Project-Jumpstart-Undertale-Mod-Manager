@@ -150,7 +150,7 @@ public class ModExtractTests : IDisposable
         string moddedFolder = Path.Combine(_root, "modded");
         Directory.CreateDirectory(moddedFolder);
         File.Copy(src, Path.Combine(moddedFolder, "data.win"));
-        File.Copy(Path.Combine(gameFolder, donor.File.Content), Path.Combine(moddedFolder, changed.File.Content));
+        File.Copy(Path.Combine(gameFolder, donor.File.Content), Path.Combine(moddedFolder, changed.File.Content.ToUpperInvariant()));
         byte[] music = File.ReadAllBytes(Path.Combine(gameFolder, reserialed.File.Content));
         for (int at = 0; at + 27 <= music.Length && music[at] == 'O' && music[at + 1] == 'g'; )
         {

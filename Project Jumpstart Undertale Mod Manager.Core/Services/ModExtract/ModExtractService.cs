@@ -430,8 +430,8 @@ public class ModExtractService(IDataService dataService) : IModExtractService
         private void StreamedSound(UndertaleSound sound, UndertaleSound? before, string name)
         {
             string? file = sound.File?.Content;
-            string? moddedFile = string.IsNullOrEmpty(file) ? null : Path.Combine(moddedFolder, file);
-            if (moddedFile is null || !File.Exists(moddedFile))
+            string? moddedFile = FindLooseFile(moddedFolder, file);
+            if (moddedFile is null)
             {
                 bool changed = before is null || before.File?.Content != file || before.Volume != sound.Volume || before.Pitch != sound.Pitch;
                 if (changed)
@@ -439,13 +439,13 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                 return;
             }
 
-            string? originalFile = before?.File?.Content is string old && !string.IsNullOrEmpty(old) ? Path.Combine(originalFolder, old) : null;
-            bool sameAudio = originalFile is not null && File.Exists(originalFile) && SameAudio(File.ReadAllBytes(originalFile), File.ReadAllBytes(moddedFile));
+            string? originalFile = FindLooseFile(originalFolder, before?.File?.Content);
+            bool sameAudio = originalFile is not null && SameAudio(File.ReadAllBytes(originalFile), File.ReadAllBytes(moddedFile));
             bool sameProperties = before is not null && IsStreamed(before) && before.Volume == sound.Volume && before.Pitch == sound.Pitch && before.Effects == sound.Effects;
             if (sameAudio && sameProperties)
                 return;
 
-            string extension = Path.GetExtension(moddedFile);
+            string extension = Path.GetExtension(moddedFile).ToLowerInvariant();
             if (string.IsNullOrEmpty(extension))
                 extension = ".ogg";
             var json = new SoundJson { Type = extension, Embedded = false, Volume = sound.Volume, Pitch = sound.Pitch, Effects = sound.Effects };
@@ -454,6 +454,28 @@ public class ModExtractService(IDataService dataService) : IModExtractService
             Count("streamed sounds");
             if (before is null)
                 DeclareNew("sounds", name);
+        }
+
+        private readonly Dictionary<string, Dictionary<string, string>> _folderFiles = new();
+
+        private string? FindLooseFile(string folder, string? file)
+        {
+            if (string.IsNullOrEmpty(file))
+                return null;
+            string exact = Path.Combine(folder, file);
+            if (File.Exists(exact))
+                return exact;
+            if (file.IndexOfAny(['/', '\\']) >= 0 || !Directory.Exists(folder))
+                return null;
+
+            if (!_folderFiles.TryGetValue(folder, out Dictionary<string, string>? files))
+            {
+                files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string path in Directory.EnumerateFiles(folder))
+                    files.TryAdd(Path.GetFileName(path), path);
+                _folderFiles[folder] = files;
+            }
+            return files.GetValueOrDefault(file);
         }
 
         private static bool SameAudio(byte[] a, byte[] b)
