@@ -83,6 +83,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         var conflictLog = new List<ConflictLogEntry>();
         var overriddenBy = new Dictionary<string, List<string>>();
         var codeOps = new List<PlannedAsset>();
+        var roomOps = new List<PlannedAsset>();
         
         foreach (ModSource mod in mods) // load order
         {
@@ -113,6 +114,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 if (addr.Category == AssetCategory.Code)
                 {
                     codeOps.Add(new PlannedAsset(addr, mod.Name, file));
+                    continue;
+                }
+
+                if (addr.Category == AssetCategory.Rooms)
+                {
+                    roomOps.Add(new PlannedAsset(addr, mod.Name, file));
                     continue;
                 }
 
@@ -158,6 +165,25 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             {
                 return MergeResult.Fail(kv.Value.OwningMod,
                     $"cannot resolve {kv.Value.Address.RelativePath}: {ex.Message}");
+            }
+        }
+
+        var newObjects = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Objects && resolutions[kv.Key] == ResolutionKind.Create)
+                                                 .Select(kv => kv.Value.Address.AssetName));
+        var roomPatches = new List<(PlannedAsset Op, Rooms.RoomJson Json)>();
+        foreach (PlannedAsset ro in roomOps)
+        {
+            if (!Path.GetExtension(ro.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
+                return MergeResult.Fail(ro.OwningMod, $"room file {ro.Address.RelativePath} must be a .json patch.");
+            try
+            {
+                Rooms.RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
+                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects);
+                roomPatches.Add((ro, json));
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(ro.OwningMod, $"cannot apply room {ro.Address.RelativePath}: {ex.Message}");
             }
         }
 
@@ -355,6 +381,21 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 return MergeResult.Fail(obj.Value.owningMod, $"failed applying object {obj.Value.address.RelativePath}: {ex.Message}");
             }
         }
+
+        var rooms = new Rooms.RoomImporter(data);
+        foreach ((PlannedAsset op, Rooms.RoomJson json) in roomPatches)
+        {
+            try
+            {
+                rooms.Apply(op.Address, json, op.OwningMod);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(op.OwningMod, $"failed applying room {op.Address.RelativePath}: {ex.Message}");
+            }
+        }
+        warnings.AddRange(rooms.Warnings);
+        conflictLog.AddRange(rooms.Conflicts);
         
         try
         {

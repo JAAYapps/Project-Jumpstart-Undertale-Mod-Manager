@@ -181,6 +181,49 @@ public class ModExtractTests : IDisposable
     }
 
     [Fact]
+    public async Task Room_instance_changes_are_extracted_and_rebuild_the_room()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        var io = new DirectDataService();
+        UndertaleData data = await io.LoadAsync(src);
+        UndertaleRoom room = data.Rooms.First(r => r?.GameObjects.Count >= 3 && r.GameObjects.Take(3).All(g => g.ObjectDefinition is not null && g.CreationCode is null));
+        UndertaleRoom.GameObject moved = room.GameObjects[0], removed = room.GameObjects[1];
+        moved.X += 4;
+        room.GameObjects.Remove(removed);
+        room.GameObjects.Add(new UndertaleRoom.GameObject { InstanceID = data.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[1].ObjectDefinition, X = 21, Y = 43, ScaleY = 3 });
+        var withCode = new UndertaleRoom.GameObject { InstanceID = data.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[1].ObjectDefinition, X = 1, Y = 1 };
+        withCode.CreationCode = UndertaleCode.CreateEmptyEntry(data, $"gml_RoomCC_{room.Name.Content}_{withCode.InstanceID}_Create");
+        room.GameObjects.Add(withCode);
+        string modded = Path.Combine(_root, "modded.win");
+        await io.SaveAsync(data, modded);
+        _out.WriteLine($"Room {room.Name.Content}: moved {moved.InstanceID}, removed {removed.InstanceID}, added 2.");
+
+        string mod = Path.Combine(_root, "RoomMod");
+        ExtractResult result = await new ModExtractService(io).ExtractAsync(src, modded, mod, "Room test mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("not converted: " + note);
+
+        Assert.Equal(1, result.WrittenByCategory["rooms"]);
+        Assert.False(result.WrittenByCategory.ContainsKey("code"));
+        Assert.Contains(result.NotConverted, n => n.Contains($"Added instance {withCode.InstanceID}") && n.Contains("creation code"));
+        JsonNode patch = JsonNode.Parse(File.ReadAllText(Path.Combine(mod, "undertale", "data.win", "rooms", room.Name.Content + ".json")))!;
+        Assert.Equal((uint)removed.InstanceID, patch["remove"]![0]!.GetValue<uint>());
+        Assert.Equal(moved.X, patch["change"]![0]!["x"]!.GetValue<int>());
+        Assert.Null(patch["change"]![0]!["y"]);
+        Assert.Single(patch["add"]!.AsArray());
+
+        string game = Path.Combine(_root, "game");
+        Directory.CreateDirectory(game);
+        File.Copy(src, Path.Combine(game, "data.win"));
+        MergeResult merge = await new ModMergeService(io).ApplyAsync(game, new List<ModSource> { new("Room test mod", mod) });
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleRoom rebuilt = (await io.LoadAsync(Path.Combine(game, "data.win"))).Rooms.ByName(room.Name.Content);
+        static string Shape(UndertaleRoom.GameObject g) => $"{g.ObjectDefinition?.Name?.Content} {g.X},{g.Y} {g.ScaleX},{g.ScaleY}";
+        Assert.Equal(room.GameObjects.Where(g => g != withCode).Select(Shape), rebuilt.GameObjects.Select(Shape));
+    }
+
+    [Fact]
     public async Task A_file_for_a_different_game_is_refused()
     {
         string? src = TestPaths.DataWin;

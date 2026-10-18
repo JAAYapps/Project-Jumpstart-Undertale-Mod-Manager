@@ -37,6 +37,7 @@ public enum AssetCategory
     Objects,
     Sounds,
     Paths,
+    Rooms,
     Files   // raw copy-as-is (shared/ music, lang json, etc.)
 }
 
@@ -191,6 +192,7 @@ public static class ModAddressParser
             case "objects": category = AssetCategory.Objects; return true;
             case "sounds": category = AssetCategory.Sounds; return true;
             case "paths": category = AssetCategory.Paths; return true;
+            case "rooms": category = AssetCategory.Rooms; return true;
             case "files": category = AssetCategory.Files; return true;
             default: category = default; return false;
         }

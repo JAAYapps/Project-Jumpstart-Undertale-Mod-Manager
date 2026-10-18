@@ -10,6 +10,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Objects;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Paths;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Rooms;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Sounds;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
@@ -93,6 +94,8 @@ public class ModExtractService(IDataService dataService) : IModExtractService
         {
             var decompileContext = new GlobalDecompileContext(modded);
             HashSet<UndertaleCode> used = UsedCode(modded);
+            HashSet<UndertaleCode> addedInstanceCode = AddedInstances().SelectMany(a => new[] { a.Instance.CreationCode, a.Instance.PreCreateCode })
+                                                                        .OfType<UndertaleCode>().ToHashSet();
             foreach (UndertaleCode code in modded.Code)
             {
                 if (code?.Name?.Content is not string name || code.ParentEntry is not null)
@@ -101,6 +104,8 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                 UndertaleCode? before = original.Code.ByName(name);
                 string moddedText = Disassemble(modded, code);
                 if (before is not null && Disassemble(original, before) == moddedText)
+                    continue;
+                if (before is null && addedInstanceCode.Contains(code))
                     continue;
                 if (!used.Contains(code))
                 {
@@ -529,12 +534,51 @@ public class ModExtractService(IDataService dataService) : IModExtractService
 
         private static string RoomFingerprint(UndertaleRoom room)
         {
-            var parts = new List<string> { $"{room.Width}x{room.Height}", $"speed {room.Speed}", $"code {NameOf(room.CreationCodeId)}", $"layers {room.Layers?.Count ?? 0}", $"tiles {room.Tiles?.Count ?? 0}" };
-            foreach (var instance in room.GameObjects)
-                parts.Add($"{NameOf(instance.ObjectDefinition)}@{instance.X},{instance.Y},{instance.ScaleX},{instance.ScaleY},{instance.Rotation},{NameOf(instance.CreationCode)}");
+            var parts = new List<string>
+            {
+                $"{room.Width}x{room.Height} speed {room.Speed} persistent {room.Persistent} color {room.BackgroundColor} {room.DrawBackgroundColor} flags {room.Flags}",
+                $"world {room.World} {room.Top},{room.Left},{room.Right},{room.Bottom} gravity {room.GravityX},{room.GravityY} {room.MetersPerPixel}",
+                $"caption {room.Caption?.Content} code {NameOf(room.CreationCodeId)}"
+            };
+            foreach (var bg in room.Backgrounds)
+                parts.Add($"bg {bg.Enabled} {bg.Foreground} {NameOf(bg.BackgroundDefinition)} {bg.X},{bg.Y} {bg.TiledHorizontally},{bg.TiledVertically} {bg.SpeedX},{bg.SpeedY} {bg.Stretch}");
+            foreach (var view in room.Views)
+                parts.Add($"view {view.Enabled} {view.ViewX},{view.ViewY},{view.ViewWidth},{view.ViewHeight} {view.PortX},{view.PortY},{view.PortWidth},{view.PortHeight} {view.BorderX},{view.BorderY} {view.SpeedX},{view.SpeedY} {NameOf(view.ObjectId)}");
+            foreach (var tile in room.Tiles)
+                parts.Add($"tile {tile.InstanceID} {NameOf(tile.ObjectDefinition)} {tile.X},{tile.Y} {tile.SourceX},{tile.SourceY} {tile.Width}x{tile.Height} {tile.TileDepth} {tile.ScaleX},{tile.ScaleY} {tile.Color}");
             foreach (var layer in room.Layers ?? [])
-                parts.Add($"layer {layer.LayerName?.Content} {layer.LayerDepth} {layer.LayerType}");
+            {
+                parts.Add($"layer {layer.LayerName?.Content} {layer.LayerId} {layer.LayerType} {layer.LayerDepth} {layer.XOffset},{layer.YOffset} {layer.HSpeed},{layer.VSpeed} {layer.IsVisible}");
+                switch (layer.Data)
+                {
+                    case UndertaleRoom.Layer.LayerBackgroundData bg:
+                        parts.Add($"  bg {NameOf(bg.Sprite)} {bg.Visible} {bg.Foreground} {bg.TiledHorizontally},{bg.TiledVertically} {bg.Stretch} {bg.Color} {bg.FirstFrame} {bg.AnimationSpeed}");
+                        break;
+                    case UndertaleRoom.Layer.LayerTilesData tiles:
+                        parts.Add($"  tiles {NameOf(tiles.Background)} {tiles.TilesX}x{tiles.TilesY} {string.Join(",", (tiles.TileData ?? []).SelectMany(row => row ?? []))}");
+                        break;
+                    case UndertaleRoom.Layer.LayerAssetsData assets:
+                        foreach (var tile in assets.LegacyTiles ?? [])
+                            parts.Add($"  tile {NameOf(tile.ObjectDefinition)} {tile.X},{tile.Y} {tile.SourceX},{tile.SourceY} {tile.Width}x{tile.Height} {tile.TileDepth}");
+                        foreach (var sprite in assets.Sprites ?? [])
+                            parts.Add($"  sprite {sprite.Name?.Content} {NameOf(sprite.Sprite)} {sprite.X},{sprite.Y} {sprite.ScaleX},{sprite.ScaleY} {sprite.Color} {sprite.Rotation}");
+                        break;
+                }
+            }
             return string.Join("|", parts);
+        }
+
+        private IEnumerable<(UndertaleRoom Room, UndertaleRoom.GameObject Instance)> AddedInstances()
+        {
+            foreach (UndertaleRoom room in modded.Rooms)
+            {
+                if (room?.Name?.Content is not string name || original.Rooms.ByName(name) is not UndertaleRoom before)
+                    continue;
+                var ids = before.GameObjects.Select(g => g.InstanceID).ToHashSet();
+                foreach (UndertaleRoom.GameObject instance in room.GameObjects)
+                    if (!ids.Contains(instance.InstanceID))
+                        yield return (room, instance);
+            }
         }
 
         private void Rooms()
@@ -545,11 +589,85 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                     continue;
                 UndertaleRoom? before = original.Rooms.ByName(name);
                 if (before is null)
-                    _notConverted.Add($"Room '{name}' is new; PJUM can't mod rooms yet.");
-                else if (RoomFingerprint(before) != RoomFingerprint(room))
-                    _notConverted.Add($"Room '{name}' changed; PJUM can't mod rooms yet.");
+                {
+                    _notConverted.Add($"Room '{name}' is new; PJUM can't create rooms yet.");
+                    continue;
+                }
+                if (RoomFingerprint(before) != RoomFingerprint(room))
+                    _notConverted.Add($"Room '{name}' has changes besides its object instances (settings, tiles, backgrounds, views or layers); only the instances were converted.");
+
+                RoomJson patch = RoomPatch(before, room, name);
+                if (patch.Add.Count == 0 && patch.Change.Count == 0 && patch.Remove.Count == 0)
+                    continue;
+                File.WriteAllText(FilePath("rooms", name + ".json"), JsonSerializer.Serialize(patch, RoomImporter.JsonOptions));
+                Count("rooms");
             }
             Removed(original.Rooms, n => modded.Rooms.ByName(n) is not null, "Room", _notConverted);
+        }
+
+        private RoomJson RoomPatch(UndertaleRoom before, UndertaleRoom room, string name)
+        {
+            var patch = new RoomJson();
+            var beforeById = new Dictionary<uint, UndertaleRoom.GameObject>();
+            foreach (UndertaleRoom.GameObject instance in before.GameObjects)
+                beforeById.TryAdd(instance.InstanceID, instance);
+            var afterIds = room.GameObjects.Select(g => g.InstanceID).ToHashSet();
+            bool layered = room.Layers is { Count: > 0 };
+
+            foreach (UndertaleRoom.GameObject now in room.GameObjects)
+            {
+                if (beforeById.TryGetValue(now.InstanceID, out UndertaleRoom.GameObject? was))
+                {
+                    if (NameOf(was.CreationCode) != NameOf(now.CreationCode) || NameOf(was.PreCreateCode) != NameOf(now.PreCreateCode))
+                        _notConverted.Add($"Instance {now.InstanceID} in room '{name}' points at different creation code; that wasn't converted.");
+                    if (layered && RoomImporter.LayerOf(before, was)?.LayerName?.Content != RoomImporter.LayerOf(room, now)?.LayerName?.Content)
+                        _notConverted.Add($"Instance {now.InstanceID} in room '{name}' moved to another layer; that wasn't converted.");
+
+                    var change = new RoomInstanceJson { Id = now.InstanceID };
+                    bool changed = false;
+                    if (NameOf(was.ObjectDefinition) != NameOf(now.ObjectDefinition) && now.ObjectDefinition is not null) { change.Object = now.ObjectDefinition.Name.Content; changed = true; }
+                    if (was.X != now.X) { change.X = now.X; changed = true; }
+                    if (was.Y != now.Y) { change.Y = now.Y; changed = true; }
+                    if (was.ScaleX != now.ScaleX) { change.ScaleX = now.ScaleX; changed = true; }
+                    if (was.ScaleY != now.ScaleY) { change.ScaleY = now.ScaleY; changed = true; }
+                    if (was.Rotation != now.Rotation) { change.Rotation = now.Rotation; changed = true; }
+                    if (was.Color != now.Color) { change.Color = now.Color; changed = true; }
+                    if (was.ImageIndex != now.ImageIndex) { change.ImageIndex = now.ImageIndex; changed = true; }
+                    if (was.ImageSpeed != now.ImageSpeed) { change.ImageSpeed = now.ImageSpeed; changed = true; }
+                    if (changed)
+                        patch.Change.Add(change);
+                    continue;
+                }
+
+                if (now.ObjectDefinition?.Name?.Content is not string objectName)
+                {
+                    _notConverted.Add($"Added instance {now.InstanceID} in room '{name}' has no object, so it wasn't converted.");
+                    continue;
+                }
+                if (now.CreationCode is not null || now.PreCreateCode is not null)
+                {
+                    _notConverted.Add($"Added instance {now.InstanceID} ({objectName}) in room '{name}' has its own creation code; PJUM can't add that yet, so the instance wasn't converted.");
+                    continue;
+                }
+                patch.Add.Add(new RoomInstanceJson
+                {
+                    Object = objectName,
+                    X = now.X,
+                    Y = now.Y,
+                    ScaleX = now.ScaleX != 1 ? now.ScaleX : null,
+                    ScaleY = now.ScaleY != 1 ? now.ScaleY : null,
+                    Rotation = now.Rotation != 0 ? now.Rotation : null,
+                    Color = now.Color != 0xFFFFFFFF ? now.Color : null,
+                    ImageIndex = now.ImageIndex != 0 ? now.ImageIndex : null,
+                    ImageSpeed = now.ImageSpeed != 0 ? now.ImageSpeed : null,
+                    Layer = layered ? RoomImporter.LayerOf(room, now)?.LayerName?.Content : null
+                });
+            }
+
+            foreach (uint id in beforeById.Keys)
+                if (!afterIds.Contains(id))
+                    patch.Remove.Add(id);
+            return patch;
         }
 
         private void OtherResources()
