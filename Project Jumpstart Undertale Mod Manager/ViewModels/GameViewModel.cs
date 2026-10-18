@@ -17,6 +17,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
@@ -38,6 +39,8 @@ public partial class GameViewModel : ViewModelBase
     private readonly ICodesService _codesService;
 
     private readonly IModPackageService _packageService;
+
+    private readonly IModExtractService _extractService;
 
     private const string Automatic = "Automatic";
 
@@ -94,7 +97,7 @@ public partial class GameViewModel : ViewModelBase
     [ObservableProperty]
     public partial CodeItem? SelectedCode { get; set; }
 
-    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, ICodesService codesService, IModPackageService packageService, string gamePath)
+    public GameViewModel(IStorageProvider storageProvider, ILauncherService launcherService, IModMergeService mergeService, IGameLocatorService gameLocator, IProtonLocatorService protonLocator, ICodesService codesService, IModPackageService packageService, IModExtractService extractService, string gamePath)
     {
         GameDirectory = gamePath;
         _storageProvider = storageProvider;
@@ -104,6 +107,7 @@ public partial class GameViewModel : ViewModelBase
         _protonLocator = protonLocator;
         _codesService = codesService;
         _packageService = packageService;
+        _extractService = extractService;
         
         // Scan for executables
         var exes = Directory.GetFiles(gamePath, "*.exe");
@@ -242,6 +246,56 @@ public partial class GameViewModel : ViewModelBase
         {
             MainWindowViewModel.SendLog(ex.Message, LogLevel.Error);
             await (Application.Current?.ShowError(ex.Message, "Could not add mod") ?? Task.FromResult(ButtonResult.Ok));
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExtractModAsync()
+    {
+        if (SelectedTarget is null)
+            return;
+        string original = Path.Combine(SelectedTarget.DataDirectory, SelectedTarget.DataFileName);
+        var files = await _storageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = $"Select a modded data file for {SelectedTarget.DisplayName}",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("GameMaker data file") { Patterns = ["*.win", "*.unx", "*.ios", "*.droid"] }]
+        });
+        if (files.Count == 0)
+            return;
+
+        string modded = files[0].Path.LocalPath;
+        if (Path.GetFullPath(modded) == Path.GetFullPath(original))
+        {
+            await (Application.Current?.ShowError("That's the game's own data file. Pick the modded copy instead.", "Extract Mod") ?? Task.FromResult(ButtonResult.Ok));
+            return;
+        }
+
+        string folder = Path.Combine(ModsDirectory, $"Extracted_{DateTime.Now:yyyyMMdd_HHmmss}");
+        string name = $"Extracted from {Path.GetFileName(Path.GetDirectoryName(modded))}";
+        MainWindowViewModel.SendLog($"Comparing {modded} with {original}. This can take a minute.");
+        try
+        {
+            ExtractResult result = await _extractService.ExtractAsync(original, modded, folder, name);
+            string written = result.WrittenByCategory.Count == 0
+                ? "No changes PJUM can carry were found."
+                : "Wrote " + string.Join(", ", result.WrittenByCategory.Select(p => $"{p.Value} {p.Key}")) + ".";
+            MainWindowViewModel.SendLog($"Extracted {name}: {written}");
+            foreach (string note in result.NotConverted)
+                MainWindowViewModel.SendLog("Not converted: " + note, LogLevel.Warn);
+            RefreshMods();
+            SelectedMod = Mods.FirstOrDefault(m => m.ModDirectory == folder) ?? SelectedMod;
+            string notes = result.NotConverted.Count == 0
+                ? "Everything that changed was converted."
+                : $"{result.NotConverted.Count} change(s) could not be converted:\n- " + string.Join("\n- ", result.NotConverted.Take(12))
+                  + (result.NotConverted.Count > 12 ? $"\n(the other {result.NotConverted.Count - 12} are in the log)" : "");
+            await (Application.Current?.ShowMessage($"{written}\n\n{notes}", "Extract Mod") ?? Task.FromResult(ButtonResult.Ok));
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            TryDeleteDir(folder);
+            MainWindowViewModel.SendLog(ex.Message, LogLevel.Error);
+            await (Application.Current?.ShowError(ex.Message, "Could not extract mod") ?? Task.FromResult(ButtonResult.Ok));
         }
     }
 

@@ -50,6 +50,7 @@
                     <!-- Bound to ViewModel Command -->
                     <Button Content="+ Add Mod" Command="{Binding AddModCommand}"/>
                     <Button Content="Create Mod" Command="{Binding CreateModCommand}"/>
+                    <Button Content="Extract Mod" Command="{Binding ExtractModCommand}"/>
                 </StackPanel>
             </Grid>
         </TabItem>

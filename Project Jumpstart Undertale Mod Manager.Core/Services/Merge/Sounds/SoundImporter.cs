@@ -77,7 +77,8 @@ public static class SoundImporter
             {
                 soundData = new UndertaleEmbeddedAudio { Data = File.ReadAllBytes(audioFile) };
                 data.EmbeddedAudio.Add(soundData);
-                if (existing?.AudioFile is not null && !needAGrp)
+                if (existing?.AudioFile is not null && !needAGrp
+                    && !data.Sounds.Any(s => s is not null && s != existing && s.AudioFile == existing.AudioFile))
                     data.EmbeddedAudio.Remove(existing.AudioFile);
                 audioId = data.EmbeddedAudio.Count - 1;
             }

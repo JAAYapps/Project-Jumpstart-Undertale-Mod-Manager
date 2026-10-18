@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using UndertaleModLib;
 using UndertaleModLib.Models;
@@ -310,6 +311,41 @@ public class SoundImporterTests
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             File.Copy(f, dest, true);
         }
+    }
+
+    [Fact]
+    public void Replacing_a_sound_that_shares_its_audio_keeps_the_other_sound_playing()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        UndertaleData data = Load(src);
+        int builtin = data.GetBuiltinSoundGroupID();
+        var shared = data.Sounds
+            .Where(s => s?.AudioFile is not null && (data.AudioGroups is not { Count: > 0 } || s.GroupID == builtin))
+            .GroupBy(s => s.AudioFile)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (shared is null) { _out.WriteLine("No two sounds share an audio entry in this game — skipping."); return; }
+        UndertaleSound replaced = shared.First();
+        UndertaleSound other = shared.Skip(1).First();
+        byte[] otherAudio = other.AudioFile.Data;
+        _out.WriteLine($"{replaced.Name.Content} and {other.Name.Content} share {shared.Key.Name.Content}; replacing {replaced.Name.Content}.");
+
+        string dir = TempDir();
+        string json = Path.Combine(dir, replaced.Name.Content + ".json");
+        string wav = Path.Combine(dir, replaced.Name.Content + ".wav");
+        File.WriteAllText(json, "{ \"type\": \".wav\", \"embedded\": true }");
+        File.WriteAllBytes(wav, TinyWav());
+        string game = ModTarget.FromData(data)?.Game ?? "undertale";
+        SoundImporter.Apply(data, dir, ParseSound(game, "data.win", replaced.Name.Content, "wav"), json, wav, false);
+
+        using var saved = new MemoryStream();
+        UndertaleIO.Write(saved, data);
+        saved.Position = 0;
+        UndertaleData after = UndertaleIO.Read(saved);
+        Assert.Equal(otherAudio, after.Sounds.ByName(other.Name.Content).AudioFile.Data);
+        Assert.Equal(TinyWav(), after.Sounds.ByName(replaced.Name.Content).AudioFile.Data);
+        TryDelete(dir);
     }
 
     private static void TryDelete(string dir)

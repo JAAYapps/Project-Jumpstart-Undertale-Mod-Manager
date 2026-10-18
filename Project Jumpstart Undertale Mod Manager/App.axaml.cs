@@ -11,6 +11,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.OneClick;
 using Avalonia.Threading;
@@ -46,6 +47,7 @@ public partial class App : Application
         collection.AddSingleton<ICodesService, CodesService>();
         collection.AddSingleton<IModPackageService, ModPackageService>();
         collection.AddSingleton<IOneClickService, OneClickService>();
+        collection.AddSingleton<IModExtractService, ModExtractService>();
         
         Services = collection.BuildServiceProvider();
 

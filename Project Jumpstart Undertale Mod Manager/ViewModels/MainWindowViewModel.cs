@@ -14,6 +14,7 @@ using MsBox.Avalonia.Enums;
 using Project_Jumpstart_Undertale_Mod_Manager.Models;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.GameLocator;
+using Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Launcher;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
@@ -32,6 +33,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly IProtonLocatorService? _protonLocator = null;
     private readonly ICodesService? _codesService = null;
     private readonly IModPackageService? _packageService = null;
+    private readonly IModExtractService? _extractService = null;
     private readonly IOneClickService? _oneClick = null;
 
     [ObservableProperty]
@@ -47,7 +49,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private GameViewModel? _selectedGame;
     
-    public MainWindowViewModel(IStorageProvider storageProvider, IGameLocatorService gameLocator, ILauncherService launcherService, IModMergeService mergeService, IProtonLocatorService protonLocator, ICodesService codesService, IModPackageService packageService, IOneClickService oneClick)
+    public MainWindowViewModel(IStorageProvider storageProvider, IGameLocatorService gameLocator, ILauncherService launcherService, IModMergeService mergeService, IProtonLocatorService protonLocator, ICodesService codesService, IModPackageService packageService, IOneClickService oneClick, IModExtractService extractService)
     {
         _storageProvider = storageProvider;
         _gameLocator = gameLocator;
@@ -57,12 +59,13 @@ public partial class MainWindowViewModel : ViewModelBase
         _codesService = codesService;
         _packageService = packageService;
         _oneClick = oneClick;
+        _extractService = extractService;
         var games = gameLocator.FindGameInstallations();
         SendLog($"Found {games.Count} game installations");
         foreach (string missing in gameLocator.MissingGames)
             SendLog($"Added game not found, skipped until its folder is back: {missing}", LogLevel.Warn);
         foreach (var game in games)
-            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, gameLocator, protonLocator, codesService, packageService, game));
+            Games.Add(new GameViewModel(storageProvider, launcherService, mergeService, gameLocator, protonLocator, codesService, packageService, extractService, game));
         if (Games.Count > 0)
             SelectedGame = Games[0];
         SendLog("Ready.");
@@ -87,9 +90,9 @@ public partial class MainWindowViewModel : ViewModelBase
             string filePath = _gameLocator?.AddCustomGame(files[0].Path.LocalPath) ?? files[0].Path.LocalPath;
 
             GameViewModel? game = Games.FirstOrDefault(g => g.GameDirectory == filePath);
-            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null && _gameLocator is not null && _protonLocator is not null && _codesService is not null && _packageService is not null)
+            if (game is null && _storageProvider is not null && _launcherService is not null && _mergeService is not null && _gameLocator is not null && _protonLocator is not null && _codesService is not null && _packageService is not null && _extractService is not null)
             {
-                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, _gameLocator, _protonLocator, _codesService, _packageService, filePath);
+                game = new GameViewModel(_storageProvider, _launcherService, _mergeService, _gameLocator, _protonLocator, _codesService, _packageService, _extractService, filePath);
                 Games.Add(game);
             }
             SelectedGame = game ?? SelectedGame;
