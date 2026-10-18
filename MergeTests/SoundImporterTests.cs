@@ -163,6 +163,38 @@ public class SoundImporterTests
         finally { TryDelete(dir); }
     }
 
+    [Fact]
+    public void A_streamed_ogg_with_a_capital_extension_lands_where_the_sound_looks()
+    {
+        string src = SourceDataWin;
+        if (string.IsNullOrEmpty(src)) { _out.WriteLine("PJUM_TEST_DATAWIN not set — skipping."); return; }
+
+        UndertaleData data = Load(src);
+        string game = TempDir();
+        string mod = TempDir();
+        try
+        {
+            string name = "snd_pjum_caps";
+            string json = Path.Combine(mod, name + ".json");
+            string ogg = Path.Combine(mod, name + ".OGG");
+            byte[] bytes = { (byte)'O', (byte)'g', (byte)'g', (byte)'S', 1, 2, 3, 4 };
+            File.WriteAllText(json, "{ \"type\": \".ogg\", \"embedded\": false }");
+            File.WriteAllBytes(ogg, bytes);
+
+            SoundImporter.Apply(data, game, ParseSound("undertale", "data.win", name, "OGG"), json, ogg, create: true);
+
+            UndertaleSound s = data.Sounds.ByName(name);
+            Assert.Equal(name + ".ogg", s.File.Content);
+            Assert.Equal(new[] { name + ".ogg" }, Directory.GetFiles(game).Select(Path.GetFileName));
+            Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(game, s.File.Content)));
+        }
+        finally
+        {
+            TryDelete(game);
+            TryDelete(mod);
+        }
+    }
+
     // REPLACE the GroupedSound test in SoundImporterTests.cs with this version.
     // It targets a real non-default audiogroup (audio_sfx) via the address
     // container, derives which audiogroupN.dat should change from the data itself

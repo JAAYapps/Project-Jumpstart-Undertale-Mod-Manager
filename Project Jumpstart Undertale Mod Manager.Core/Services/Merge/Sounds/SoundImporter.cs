@@ -117,7 +117,7 @@ public static class SoundImporter
             else if (!embedSound)
             {
                 // External streamed OGG: no embedded entry; loose .ogg into gameDir.
-                string dest = Path.Combine(gameDir, name + (Path.GetExtension(audioFile) ?? ".ogg"));
+                string dest = Path.Combine(gameDir, name + ".ogg");
                 if (Path.GetFullPath(audioFile) != Path.GetFullPath(dest))
                     File.Copy(audioFile, dest, overwrite: true);
                 audioId = -1;
