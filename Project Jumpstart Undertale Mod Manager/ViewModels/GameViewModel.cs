@@ -21,6 +21,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModPackage;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Proton;
 using Project_Jumpstart_Undertale_Mod_Manager.Utilities;
+using PjumModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.ViewModels;
 

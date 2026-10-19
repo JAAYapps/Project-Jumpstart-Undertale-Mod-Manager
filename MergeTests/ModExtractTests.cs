@@ -14,6 +14,7 @@ using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 using Xunit;
+using PjumModLib;
 
 namespace MergeTests;
 

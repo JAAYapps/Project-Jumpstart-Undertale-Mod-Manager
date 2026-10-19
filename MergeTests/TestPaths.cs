@@ -4,6 +4,7 @@ using System.IO;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.SteamScanner;
 using UndertaleModLib;
+using PjumModLib;
 
 namespace MergeTests;
 

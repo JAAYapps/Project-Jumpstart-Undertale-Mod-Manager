@@ -1,5 +1,6 @@
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Xunit;
+using PjumModLib;
 
 namespace MergeTests;
 
@@ -32,6 +33,25 @@ public class ModAddressParserTests
         Assert.Equal(AssetCategory.Sounds, a.Category);
         Assert.Equal("snd_x", a.AssetName);
         Assert.Null(a.Frame);
+    }
+
+    [Theory]
+    [InlineData("undertale/data.win/game.json", new[] { "data.win" })]
+    [InlineData("deltarune/chapter2/data.win/game.json", new[] { "chapter2", "data.win" })]
+    public void Game_json_beside_the_categories_parses_as_game_names(string path, string[] route)
+    {
+        var a = ModAddressParser.Parse(path);
+        Assert.Equal(AssetCategory.Game, a.Category);
+        Assert.Equal(route, a.Route);
+        Assert.Equal("game", a.AssetName);
+    }
+
+    [Fact]
+    public void A_file_named_game_json_inside_a_category_stays_in_that_category()
+    {
+        var a = ModAddressParser.Parse("undertale/data.win/files/game.json");
+        Assert.Equal(AssetCategory.Files, a.Category);
+        Assert.Equal("game.json", a.AssetName);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Code;
+using PjumModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Codes;
 

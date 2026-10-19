@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using UndertaleModLib;
 using UndertaleModLib.Models;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
+using PjumModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Sounds;
 
@@ -26,16 +27,6 @@ namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Sounds;
 // The container is matched against Data.AudioGroups[i].Name.Content; its index
 // is the GroupID. A container that isn't a real group name => builtin.
 // ---------------------------------------------------------------------------
-
-public sealed class SoundJson
-{
-    [JsonPropertyName("type")]         public string? Type { get; set; } = null;
-    [JsonPropertyName("embedded")]     public bool Embedded { get; set; } = true;
-    [JsonPropertyName("decodeOnLoad")] public bool DecodeOnLoad { get; set; }
-    [JsonPropertyName("volume")]       public float Volume { get; set; } = 1f;
-    [JsonPropertyName("pitch")]        public float Pitch { get; set; } = 1f;
-    [JsonPropertyName("effects")]      public uint Effects { get; set; }
-}
 
 public static class SoundImporter
 {

@@ -9,6 +9,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\UndertaleModTool\UndertaleModLib\UndertaleModLib.csproj" />
+      <ProjectReference Include="..\UndertaleModTool\PjumModLib\PjumModLib.csproj" />
     </ItemGroup>
 
     <ItemGroup>

@@ -4,6 +4,7 @@ using System;
 using UndertaleModLib;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Xunit;
+using PjumModLib;
 
 namespace MergeTests;
 

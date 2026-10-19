@@ -1,10 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using UndertaleModLib;
 using UndertaleModLib.Compiler;
+using UndertaleModLib.Models;
 using System.Text.Json;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Code;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Textures;
+using PjumModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge;
 
@@ -84,6 +86,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         var overriddenBy = new Dictionary<string, List<string>>();
         var codeOps = new List<PlannedAsset>();
         var roomOps = new List<PlannedAsset>();
+        var gameOps = new List<PlannedAsset>();
         
         foreach (ModSource mod in mods) // load order
         {
@@ -120,6 +123,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 if (addr.Category == AssetCategory.Rooms)
                 {
                     roomOps.Add(new PlannedAsset(addr, mod.Name, file));
+                    continue;
+                }
+
+                if (addr.Category == AssetCategory.Game)
+                {
+                    gameOps.Add(new PlannedAsset(addr, mod.Name, file));
                     continue;
                 }
 
@@ -170,14 +179,14 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
         var newObjects = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Objects && resolutions[kv.Key] == ResolutionKind.Create)
                                                  .Select(kv => kv.Value.Address.AssetName));
-        var roomPatches = new List<(PlannedAsset Op, Rooms.RoomJson Json)>();
+        var roomPatches = new List<(PlannedAsset Op, RoomJson Json)>();
         foreach (PlannedAsset ro in roomOps)
         {
             if (!Path.GetExtension(ro.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
                 return MergeResult.Fail(ro.OwningMod, $"room file {ro.Address.RelativePath} must be a .json patch.");
             try
             {
-                Rooms.RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
+                RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
                 Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects);
                 roomPatches.Add((ro, json));
             }
@@ -185,6 +194,23 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             {
                 return MergeResult.Fail(ro.OwningMod, $"cannot apply room {ro.Address.RelativePath}: {ex.Message}");
             }
+        }
+
+        var gamePatches = new List<(PlannedAsset Op, GameJson Json)>();
+        foreach (PlannedAsset go in gameOps)
+        {
+            GameJson? json;
+            try
+            {
+                json = JsonSerializer.Deserialize<GameJson>(File.ReadAllText(go.SourceFile), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (JsonException ex)
+            {
+                return MergeResult.Fail(go.OwningMod, $"{go.Address.RelativePath} is invalid: {ex.Message}");
+            }
+            if (json is null || new[] { json.Name, json.DisplayName, json.FileName }.All(string.IsNullOrWhiteSpace))
+                return MergeResult.Fail(go.OwningMod, $"{go.Address.RelativePath} sets none of \"name\", \"displayName\" or \"fileName\".");
+            gamePatches.Add((go, json));
         }
 
         string dataDir = Path.GetFullPath(gameDir);
@@ -383,7 +409,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
 
         var rooms = new Rooms.RoomImporter(data);
-        foreach ((PlannedAsset op, Rooms.RoomJson json) in roomPatches)
+        foreach ((PlannedAsset op, RoomJson json) in roomPatches)
         {
             try
             {
@@ -396,6 +422,27 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         }
         warnings.AddRange(rooms.Warnings);
         conflictLog.AddRange(rooms.Conflicts);
+
+        var gameFieldOwners = new Dictionary<string, List<string>>();
+        foreach ((PlannedAsset op, GameJson json) in gamePatches)
+        {
+            void Set(string field, string? value, Action<UndertaleString> apply)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                apply(data.Strings.MakeString(value));
+                string key = $"{op.Address.Game}/{op.Address.Container}/game:{field}";
+                if (!gameFieldOwners.TryGetValue(key, out List<string>? owners))
+                    gameFieldOwners[key] = owners = new List<string>();
+                owners.Remove(op.OwningMod);
+                owners.Add(op.OwningMod);
+            }
+            Set("name", json.Name, v => data.GeneralInfo.Name = v);
+            Set("displayName", json.DisplayName, v => data.GeneralInfo.DisplayName = v);
+            Set("fileName", json.FileName, v => data.GeneralInfo.FileName = v);
+        }
+        foreach ((string key, List<string> owners) in gameFieldOwners)
+            if (owners.Count > 1)
+                conflictLog.Add(new ConflictLogEntry(key, owners[^1], owners.Take(owners.Count - 1).ToList()));
         
         try
         {

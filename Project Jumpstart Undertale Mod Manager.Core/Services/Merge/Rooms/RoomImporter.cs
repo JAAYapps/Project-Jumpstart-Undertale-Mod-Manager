@@ -3,40 +3,12 @@ using System.Text.Json.Serialization;
 using UndertaleModLib;
 using UndertaleModLib.Models;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Addressing;
+using PjumModLib;
 
 namespace Project_Jumpstart_Undertale_Mod_Manager.Services.Merge.Rooms;
 
-public sealed class RoomJson
-{
-    [JsonPropertyName("add")] public List<RoomInstanceJson> Add { get; set; } = new();
-    [JsonPropertyName("change")] public List<RoomInstanceJson> Change { get; set; } = new();
-    [JsonPropertyName("remove")] public List<uint> Remove { get; set; } = new();
-}
-
-public sealed class RoomInstanceJson
-{
-    [JsonPropertyName("id")] public uint? Id { get; set; }
-    [JsonPropertyName("object")] public string? Object { get; set; }
-    [JsonPropertyName("x")] public int? X { get; set; }
-    [JsonPropertyName("y")] public int? Y { get; set; }
-    [JsonPropertyName("scaleX")] public float? ScaleX { get; set; }
-    [JsonPropertyName("scaleY")] public float? ScaleY { get; set; }
-    [JsonPropertyName("rotation")] public float? Rotation { get; set; }
-    [JsonPropertyName("color")] public uint? Color { get; set; }
-    [JsonPropertyName("imageIndex")] public int? ImageIndex { get; set; }
-    [JsonPropertyName("imageSpeed")] public float? ImageSpeed { get; set; }
-    [JsonPropertyName("layer")] public string? Layer { get; set; }
-}
-
 public sealed class RoomImporter(UndertaleData data)
 {
-    public static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     private readonly Dictionary<string, string> _changedBy = new();
     private readonly Dictionary<string, List<string>> _overridden = new();
     private readonly Dictionary<string, string> _removedBy = new();
@@ -50,7 +22,7 @@ public sealed class RoomImporter(UndertaleData data)
     {
         try
         {
-            return JsonSerializer.Deserialize<RoomJson>(File.ReadAllText(file), JsonOptions)
+            return JsonSerializer.Deserialize<RoomJson>(File.ReadAllText(file), RoomJson.JsonOptions)
                    ?? throw new InvalidOperationException($"Room JSON '{file}' parsed to null.");
         }
         catch (JsonException ex)
@@ -167,22 +139,16 @@ public sealed class RoomImporter(UndertaleData data)
             if (room.Layers is { Count: > 0 })
             {
                 UndertaleRoom.Layer layer = (add.Layer is null ? null : FindLayer(room, add.Layer))
-                                            ?? InstanceLayers(room).FirstOrDefault(l => l.LayerDepth == obj.Depth)
-                                            ?? InstanceLayers(room).FirstOrDefault()
+                                            ?? RoomLayers.InstanceLayers(room).FirstOrDefault(l => l.LayerDepth == obj.Depth)
+                                            ?? RoomLayers.InstanceLayers(room).FirstOrDefault()
                                             ?? throw new InvalidOperationException($"Room '{room.Name.Content}' has no instance layer to add '{obj.Name.Content}' to.");
                 layer.InstancesData.Instances.Add(instance);
             }
         }
     }
 
-    public static UndertaleRoom.Layer? LayerOf(UndertaleRoom room, UndertaleRoom.GameObject instance) =>
-        InstanceLayers(room).FirstOrDefault(l => l.InstancesData.Instances.Contains(instance));
-
-    private static IEnumerable<UndertaleRoom.Layer> InstanceLayers(UndertaleRoom room) =>
-        (room.Layers ?? []).Where(l => l.LayerType == UndertaleRoom.LayerType.Instances && l.InstancesData is not null);
-
     private static UndertaleRoom.Layer? FindLayer(UndertaleRoom room, string name) =>
-        InstanceLayers(room).FirstOrDefault(l => l.LayerName?.Content == name);
+        RoomLayers.InstanceLayers(room).FirstOrDefault(l => l.LayerName?.Content == name);
 
     private UndertaleGameObject Object(string name) =>
         data.GameObjects.ByName(name) ?? throw new InvalidOperationException($"Object '{name}' doesn't exist.");
@@ -203,7 +169,7 @@ public sealed class RoomImporter(UndertaleData data)
     {
         room.GameObjects.Remove(instance);
         room.InstanceCreationOrderIDs?.InstanceIDs.Remove(instance.InstanceID);
-        foreach (UndertaleRoom.Layer layer in InstanceLayers(room))
+        foreach (UndertaleRoom.Layer layer in RoomLayers.InstanceLayers(room))
             layer.InstancesData.Instances.Remove(instance);
     }
 }

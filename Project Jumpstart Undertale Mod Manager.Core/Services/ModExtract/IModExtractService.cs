@@ -1,9 +1,6 @@
-namespace Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
+using PjumModLib;
 
-public sealed record ExtractResult(
-    string ModDirectory,
-    IReadOnlyDictionary<string, int> WrittenByCategory,
-    IReadOnlyList<string> NotConverted);
+namespace Project_Jumpstart_Undertale_Mod_Manager.Services.ModExtract;
 
 public interface IModExtractService
 {
