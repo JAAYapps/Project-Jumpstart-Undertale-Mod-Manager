@@ -178,25 +178,13 @@ public static class ObjectImporter
             }
             else if (action.CodeId is null)
             {
-                action.CodeId = FindOrCreateCode(data, DefaultCodeName(data, name, type, subtype));
+                action.CodeId = FindOrCreateCode(data, ObjectEvents.DefaultCodeName(data, name, type, subtype));
             }
         }
     }
 
     private static UndertaleCode FindOrCreateCode(UndertaleData data, string codeName)
         => data.Code.ByName(codeName) ?? UndertaleCode.CreateEmptyEntry(data, codeName);
-
-    // gml_Object_<obj>_<type>_<subtype>, the name the code/ importer looks up.
-    // GM 2.3+ names a collision event after the other object rather than its index.
-    private static string DefaultCodeName(UndertaleData data, string obj, EventType type, uint subtype)
-    {
-        if (type == EventType.Collision && data.IsVersionAtLeast(2, 3)
-            && subtype < data.GameObjects.Count
-            && data.GameObjects[(int)subtype]?.Name?.Content is string other)
-            return $"gml_Object_{obj}_Collision_{other}";
-
-        return $"gml_Object_{obj}_{type}_{subtype}";
-    }
 
     // "subtype" may be omitted (0), a number, or a name: the other object's name
     // for Collision, otherwise the event's own subtype enum (BeginStep, DrawGUI,

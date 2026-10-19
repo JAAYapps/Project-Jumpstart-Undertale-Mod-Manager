@@ -80,6 +80,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         if (target is null)
             warnings.Add("data.win has no game name; mod paths were not checked against the game.");
 
+        var renames = new AssetRenames(data);
+        foreach (ModSource mod in mods)
+            if (!renames.TryAdd(mod.Name, manifests[mod.Name].Renames, out string renameError))
+                return MergeResult.Fail(mod.Name, renameError);
+        renames.Apply();
+
         // === PHASE 3: gather + parse every address, build the last-wins plan =
         var plan = new Dictionary<string, PlannedAsset>();
         var conflictLog = new List<ConflictLogEntry>();
@@ -112,6 +118,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     continue;
                 }
                 accepted++;
+                addr = renames.Alias(addr, mod.Name);
 
                 // Code is meant to accumulate to combine mods together in code, otherwise one mod will break or disable another programmatically.
                 if (addr.Category == AssetCategory.Code)
@@ -152,7 +159,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             if (accepted > 0)
                 foreach (string game in otherGames)
                     warnings.Add($"[{mod.Name}] files under '{game}/' were skipped: this game is '{target!.Game}'.");
-            if (accepted == 0)
+            if (accepted == 0 && manifests[mod.Name].Renames.Count == 0)
                 warnings.Add(target is null
                     ? $"[{mod.Name}] has no files; skipped."
                     : $"[{mod.Name}] has no files for {target}; skipped.");
@@ -285,8 +292,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             // Re-scan the owning mod for both files by asset name (the plan
             // collapsed them into one entry, so don't trust a single SourceFile).
             ModSource owner = mods.First(m => m.Name == b.OwningMod);
-            string? jsonFile = FindSoundFile(owner, b.Address, target, ".json");
-            string? audioFile = FindSoundFile(owner, b.Address, target, ".wav", ".ogg", ".mp3");
+            string? jsonFile = FindSoundFile(owner, b.Address, target, renames, ".json");
+            string? audioFile = FindSoundFile(owner, b.Address, target, renames, ".wav", ".ogg", ".mp3");
 
             if (jsonFile is null)
             {
@@ -325,6 +332,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                     string rel = ToModRelative(owner, file);
                     if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
                     if (target is not null && !target.Accepts(a)) continue;   // same name in another chapter
+                    a = renames.Alias(a, owner.Name);
                     if (a.Category  != pa.Address.Category)  continue;
                     if (a.AssetName != pa.Address.AssetName) continue;
                     if (a.Container != pa.Address.Container) continue;
@@ -421,6 +429,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             }
         }
         warnings.AddRange(rooms.Warnings);
+        warnings.AddRange(renames.Warnings);
         conflictLog.AddRange(rooms.Conflicts);
 
         var gameFieldOwners = new Dictionary<string, List<string>>();
@@ -503,13 +512,14 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
     // Find <assetName>.<ext> for a sound within the owning mod, matching the
     // asset's addressed location (same route/container). Returns null if absent.
-    private static string? FindSoundFile(ModSource mod, ModAddress addr, ModTarget? target, params string[] exts)
+    private static string? FindSoundFile(ModSource mod, ModAddress addr, ModTarget? target, AssetRenames renames, params string[] exts)
     {
         foreach (string file in EnumerateModFiles(mod))
         {
             string rel = Path.GetRelativePath(mod.ModDirectory, file).Replace('\\', '/');
             if (!ModAddressParser.TryParse(rel, out ModAddress? a, out _)) continue;
             if (target is not null && !target.Accepts(a)) continue;   // same name in another chapter
+            a = renames.Alias(a, mod.Name);
             if (a.Category != AssetCategory.Sounds) continue;
             if (a.AssetName != addr.AssetName) continue;
             if (a.Container != addr.Container) continue;   // same audiogroup/container

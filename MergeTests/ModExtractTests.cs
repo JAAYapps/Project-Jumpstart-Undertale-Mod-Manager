@@ -254,6 +254,49 @@ public class ModExtractTests : IDisposable
     }
 
     [Fact]
+    public async Task Event_code_entries_that_share_a_name_keep_their_own_code()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        var io = new DirectDataService();
+        UndertaleData original = await io.LoadAsync(src);
+        UndertaleData modded = await io.LoadAsync(src);
+        var picks = modded.GameObjects
+            .Select(o => (Object: o, Code: o.Events[(int)EventType.Create].FirstOrDefault()?.Actions.FirstOrDefault()?.CodeId))
+            .Where(p => p.Code is not null && p.Code.Length > 40 && p.Code.ParentEntry is null)
+            .Take(2).ToList();
+        Assert.Equal(2, picks.Count);
+        string Decompile(UndertaleData d, UndertaleCode c) =>
+            new Underanalyzer.Decompiler.DecompileContext(new GlobalDecompileContext(d), c, d.ToolInfo.DecompilerSettings).DecompileToString();
+        var expected = picks.Select(p => Decompile(modded, p.Code!)).ToList();
+        Assert.NotEqual(expected[0], expected[1]);
+        foreach (var p in picks)
+            p.Code!.Name = modded.Strings.MakeString("pjum_shared");
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "SharedNameMod");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Shared name mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+
+        Assert.False(File.Exists(Path.Combine(mod, "undertale", "data.win", "code", "pjum_shared.gml")));
+        Assert.Contains(result.NotConverted, n => n.Contains("share a name") && n.Contains("'pjum_shared'"));
+        Assert.DoesNotContain(result.NotConverted, n => n.Contains("was removed"));
+
+        string game = Path.Combine(_root, "game");
+        Directory.CreateDirectory(game);
+        File.Copy(src, Path.Combine(game, "data.win"));
+        MergeResult merge = await new ModMergeService(io).ApplyAsync(game, new List<ModSource> { new("Shared name mod", mod) });
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleData after = await io.LoadAsync(Path.Combine(game, "data.win"));
+        for (int i = 0; i < 2; i++)
+        {
+            UndertaleCode code = after.GameObjects.ByName(picks[i].Object.Name.Content).Events[(int)EventType.Create][0].Actions[0].CodeId;
+            Assert.Equal(expected[i], Decompile(after, code));
+        }
+    }
+
+    [Fact]
     public async Task A_file_for_a_different_game_is_refused()
     {
         string? src = TestPaths.DataWin;
