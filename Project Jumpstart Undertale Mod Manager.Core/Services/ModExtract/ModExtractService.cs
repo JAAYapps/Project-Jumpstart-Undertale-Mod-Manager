@@ -94,6 +94,10 @@ public class ModExtractService(IDataService dataService) : IModExtractService
         {
             var decompileContext = new GlobalDecompileContext(modded);
             HashSet<UndertaleCode> used = UsedCode(modded);
+            var movedObjects = new Dictionary<int, string>();
+            for (int i = 0; i < modded.GameObjects.Count; i++)
+                if (modded.GameObjects[i]?.Name?.Content is string objectName && original.GameObjects.ElementAtOrDefault(i)?.Name?.Content != objectName)
+                    movedObjects[i] = objectName;
             HashSet<UndertaleCode> addedInstanceCode = AddedInstances().SelectMany(a => new[] { a.Instance.CreationCode, a.Instance.PreCreateCode })
                                                                         .OfType<UndertaleCode>().ToHashSet();
             foreach (UndertaleCode code in modded.Code)
@@ -124,12 +128,71 @@ public class ModExtractService(IDataService dataService) : IModExtractService
                     continue;
                 }
 
+                gml = NameObjectNumbers(name, gml, movedObjects);
                 File.WriteAllText(FilePath("code", name + ".gml"), gml);
                 Count("code");
                 if (before is null)
                     DeclareNew("code", name);
             }
             Removed(original.Code.Where(c => c?.ParentEntry is null), n => modded.Code.ByName(n) is not null, "Code", _notConverted);
+        }
+
+        private string NameObjectNumbers(string codeName, string gml, Dictionary<int, string> movedObjects)
+        {
+            if (movedObjects.Count == 0)
+                return gml;
+            string[] lines = gml.Split('\n');
+            for (int n = 0; n < lines.Length; n++)
+            {
+                string line = lines[n];
+                string trimmed = line.TrimEnd();
+                int equals = trimmed.IndexOf(" = ", StringComparison.Ordinal);
+                if (trimmed.EndsWith(';') && equals > 0)
+                {
+                    string left = trimmed[..equals].Trim();
+                    string right = trimmed[(equals + 3)..^1];
+                    if (left.Length > 0 && left.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '.') && !char.IsDigit(left[0])
+                        && right.Length > 0 && right.All(char.IsDigit) && int.TryParse(right, out int value) && movedObjects.TryGetValue(value, out string? objectName))
+                    {
+                        lines[n] = trimmed[..(equals + 3)] + objectName + ";" + line[trimmed.Length..];
+                        continue;
+                    }
+                }
+
+                foreach (int value in NumbersOutsideStrings(line))
+                    if (movedObjects.TryGetValue(value, out string? maybe))
+                        _notConverted.Add($"Code '{codeName}' line {n + 1}: {value} may mean object '{maybe}', whose number is different in the modded file; check it.");
+            }
+            return string.Join('\n', lines);
+        }
+
+        private static IEnumerable<int> NumbersOutsideStrings(string line)
+        {
+            int i = 0;
+            while (i < line.Length)
+            {
+                char c = line[i];
+                if (c == '"' || c == '\'')
+                {
+                    int close = line.IndexOf(c, i + 1);
+                    i = close < 0 ? line.Length : close + 1;
+                    continue;
+                }
+                if (c == '/' && i + 1 < line.Length && line[i + 1] == '/')
+                    yield break;
+                if (char.IsDigit(c))
+                {
+                    int start = i;
+                    while (i < line.Length && char.IsDigit(line[i]))
+                        i++;
+                    bool partOfName = start > 0 && (char.IsLetterOrDigit(line[start - 1]) || line[start - 1] == '_' || line[start - 1] == '.' || line[start - 1] == '$');
+                    bool decimalPart = i < line.Length && (line[i] == '.' || char.IsLetter(line[i]) || line[i] == '_');
+                    if (!partOfName && !decimalPart && int.TryParse(line[start..i], out int value))
+                        yield return value;
+                    continue;
+                }
+                i++;
+            }
         }
 
         private static HashSet<UndertaleCode> UsedCode(UndertaleData data)

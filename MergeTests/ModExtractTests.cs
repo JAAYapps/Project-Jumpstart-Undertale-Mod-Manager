@@ -224,6 +224,35 @@ public class ModExtractTests : IDisposable
     }
 
     [Fact]
+    public async Task An_object_stored_by_number_is_written_by_name()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        var io = new DirectDataService();
+        UndertaleData data = await io.LoadAsync(src);
+        const string objectName = "obj_pjum_by_number";
+        var obj = new UndertaleGameObject { Name = data.Strings.MakeString(objectName) };
+        data.GameObjects.Add(obj);
+        int index = data.GameObjects.IndexOf(obj);
+        string script = data.IsVersionAtLeast(2, 3) ? "gml_GlobalScript_pjum_by_number" : "gml_Script_pjum_by_number";
+        var group = new CodeImportGroup(data);
+        group.QueueReplace(script, $"pjum_stored = {objectName};\npjum_list[{index}] = 1;");
+        Assert.True(group.Import(false).Successful);
+        string modded = Path.Combine(_root, "modded.win");
+        await io.SaveAsync(data, modded);
+
+        string mod = Path.Combine(_root, "NumberMod");
+        ExtractResult result = await new ModExtractService(io).ExtractAsync(src, modded, mod, "Number test mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("not converted: " + note);
+
+        string gml = File.ReadAllText(Path.Combine(mod, "undertale", "data.win", "code", script + ".gml"));
+        _out.WriteLine(gml);
+        Assert.Contains($"pjum_stored = {objectName};", gml);
+        Assert.Contains($"pjum_list[{index}] = 1;", gml);
+        Assert.Contains(result.NotConverted, n => n.Contains($"Code '{script}' line 2") && n.Contains($"{index} may mean object '{objectName}'"));
+    }
+
+    [Fact]
     public async Task A_file_for_a_different_game_is_refused()
     {
         string? src = TestPaths.DataWin;
