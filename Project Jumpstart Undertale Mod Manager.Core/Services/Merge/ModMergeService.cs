@@ -186,6 +186,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
         var newObjects = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Objects && resolutions[kv.Key] == ResolutionKind.Create)
                                                  .Select(kv => kv.Value.Address.AssetName));
+        var newBackgrounds = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Backgrounds && resolutions[kv.Key] == ResolutionKind.Create)
+                                                     .Select(kv => kv.Value.Address.AssetName));
         var roomPatches = new List<(PlannedAsset Op, RoomJson Json)>();
         foreach (PlannedAsset ro in roomOps)
         {
@@ -194,7 +196,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             try
             {
                 RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
-                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects);
+                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects, newBackgrounds);
                 roomPatches.Add((ro, json));
             }
             catch (Exception ex)
@@ -376,7 +378,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
             if (anyTexture)
             {
-                RepackResult rr = await _repacker.RepackAsync(data, overridesDir, spriteBoxes);
+                RepackResult rr = await _repacker.RepackAsync(data, overridesDir, spriteBoxes, newBackgrounds);
                 warnings.AddRange(rr.Warnings);
             }
         }

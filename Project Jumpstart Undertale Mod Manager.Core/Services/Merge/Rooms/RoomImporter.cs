@@ -31,7 +31,7 @@ public sealed class RoomImporter(UndertaleData data)
         }
     }
 
-    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects)
+    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds)
     {
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)
                              ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; PJUM can't create rooms yet.");
@@ -72,6 +72,53 @@ public sealed class RoomImporter(UndertaleData data)
 
         foreach (uint id in json.Remove)
             CheckId(id, "\"remove\"");
+
+        void CheckBackground(string? name, string where)
+        {
+            if (name is not null && data.Backgrounds.ByName(name) is null && !newBackgrounds.Contains(name))
+                throw new InvalidOperationException($"{where} uses background '{name}', which doesn't exist and no mod creates it.");
+        }
+
+        foreach (RoomBackgroundJson slot in json.Backgrounds ?? [])
+        {
+            if (slot.Slot < 0 || slot.Slot >= room.Backgrounds.Count)
+                throw new InvalidOperationException($"Room '{room.Name.Content}' has background slots 0 to {room.Backgrounds.Count - 1}, not {slot.Slot}.");
+            CheckBackground(slot.Background, $"Background slot {slot.Slot} in room '{room.Name.Content}'");
+        }
+        foreach (RoomViewJson view in json.Views ?? [])
+        {
+            if (view.Slot < 0 || view.Slot >= room.Views.Count)
+                throw new InvalidOperationException($"Room '{room.Name.Content}' has views 0 to {room.Views.Count - 1}, not {view.Slot}.");
+            CheckObject(view.Follow, $"View {view.Slot} in room '{room.Name.Content}'");
+        }
+
+        if (json.Tiles is RoomTilesJson tiles)
+        {
+            if (layered)
+                throw new InvalidOperationException($"Room '{room.Name.Content}' keeps its tiles in layers; PJUM can't change tile layers yet.");
+            void CheckTile(uint id, string where)
+            {
+                if (!room.Tiles.Any(t => t.InstanceID == id))
+                    throw new InvalidOperationException($"{where}: room '{room.Name.Content}' has no tile {id}.");
+            }
+            foreach (RoomTileJson add in tiles.Add)
+            {
+                if (add.Id is not null)
+                    throw new InvalidOperationException($"An added tile in room '{room.Name.Content}' has \"id\": {add.Id}. Added tiles get their id from the merge; remove \"id\", or move it to \"change\".");
+                if (string.IsNullOrEmpty(add.Background))
+                    throw new InvalidOperationException($"An added tile in room '{room.Name.Content}' has no \"background\".");
+                CheckBackground(add.Background, $"An added tile in room '{room.Name.Content}'");
+            }
+            foreach (RoomTileJson change in tiles.Change)
+            {
+                if (change.Id is not uint id)
+                    throw new InvalidOperationException($"A changed tile in room '{room.Name.Content}' has no \"id\".");
+                CheckTile(id, "\"tiles.change\"");
+                CheckBackground(change.Background, $"Tile {id} in room '{room.Name.Content}'");
+            }
+            foreach (uint id in tiles.Remove)
+                CheckTile(id, "\"tiles.remove\"");
+        }
     }
 
     public void Apply(ModAddress addr, RoomJson json, string modName)
@@ -79,6 +126,7 @@ public sealed class RoomImporter(UndertaleData data)
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)
                              ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; PJUM can't create rooms yet.");
         string roomKey = $"{addr.Game}/{addr.Container}/rooms:{room.Name.Content}";
+        ApplyRoomParts(room, roomKey, json, modName);
 
         foreach (uint id in json.Remove)
         {
@@ -146,6 +194,120 @@ public sealed class RoomImporter(UndertaleData data)
             }
         }
     }
+
+    private void ApplyRoomParts(UndertaleRoom room, string roomKey, RoomJson json, string modName)
+    {
+        if (json.Settings is RoomSettingsJson settings)
+        {
+            if (settings.Width is uint width) { room.Width = width; Track(roomKey + ".width", modName); }
+            if (settings.Height is uint height) { room.Height = height; Track(roomKey + ".height", modName); }
+            if (settings.Speed is uint speed) { room.Speed = speed; Track(roomKey + ".speed", modName); }
+            if (settings.Persistent is bool persistent) { room.Persistent = persistent; Track(roomKey + ".persistent", modName); }
+            if (settings.BackgroundColor is uint color) { room.BackgroundColor = color; Track(roomKey + ".backgroundColor", modName); }
+            if (settings.DrawBackgroundColor is bool draw) { room.DrawBackgroundColor = draw; Track(roomKey + ".drawBackgroundColor", modName); }
+            if (settings.Caption is string caption) { room.Caption = data.Strings.MakeString(caption); Track(roomKey + ".caption", modName); }
+        }
+
+        foreach (RoomBackgroundJson slot in json.Backgrounds ?? [])
+        {
+            UndertaleRoom.Background bg = room.Backgrounds[slot.Slot];
+            bg.Enabled = slot.Enabled;
+            bg.BackgroundDefinition = slot.Background is null ? null : data.Backgrounds.ByName(slot.Background)
+                                      ?? throw new InvalidOperationException($"Background '{slot.Background}' doesn't exist.");
+            bg.X = slot.X;
+            bg.Y = slot.Y;
+            bg.TiledHorizontally = slot.TileX;
+            bg.TiledVertically = slot.TileY;
+            bg.SpeedX = slot.SpeedX;
+            bg.SpeedY = slot.SpeedY;
+            bg.Foreground = slot.Foreground;
+            bg.Stretch = slot.Stretch;
+            Track($"{roomKey}.background{slot.Slot}", modName);
+        }
+
+        foreach (RoomViewJson view in json.Views ?? [])
+        {
+            UndertaleRoom.View v = room.Views[view.Slot];
+            v.Enabled = view.Enabled;
+            v.ViewX = view.ViewX;
+            v.ViewY = view.ViewY;
+            v.ViewWidth = view.ViewWidth;
+            v.ViewHeight = view.ViewHeight;
+            v.PortX = view.PortX;
+            v.PortY = view.PortY;
+            v.PortWidth = view.PortWidth;
+            v.PortHeight = view.PortHeight;
+            v.BorderX = view.BorderX;
+            v.BorderY = view.BorderY;
+            v.SpeedX = view.SpeedX;
+            v.SpeedY = view.SpeedY;
+            v.ObjectId = view.Follow is null ? null : Object(view.Follow);
+            Track($"{roomKey}.view{view.Slot}", modName);
+        }
+
+        if (json.Tiles is not RoomTilesJson tiles)
+            return;
+
+        foreach (uint id in tiles.Remove)
+        {
+            string key = $"{roomKey}#tile{id}";
+            UndertaleRoom.Tile? tile = room.Tiles.FirstOrDefault(t => t.InstanceID == id);
+            if (tile is null)
+            {
+                if (_removedBy.TryGetValue(key, out string? by) && by != modName)
+                    Warnings.Add($"[{modName}] removes tile {id} in room '{room.Name.Content}', but '{by}' already removed it.");
+                continue;
+            }
+            room.Tiles.Remove(tile);
+            _removedBy[key] = modName;
+        }
+
+        foreach (RoomTileJson change in tiles.Change)
+        {
+            uint id = change.Id!.Value;
+            string key = $"{roomKey}#tile{id}";
+            UndertaleRoom.Tile? tile = room.Tiles.FirstOrDefault(t => t.InstanceID == id);
+            if (tile is null)
+            {
+                string by = _removedBy.GetValueOrDefault(key, modName);
+                Warnings.Add($"[{modName}] changes tile {id} in room '{room.Name.Content}', but '{by}' removed it; skipped.");
+                continue;
+            }
+            if (change.Background is not null) { tile.BackgroundDefinition = Background(change.Background); Track(key + ".background", modName); }
+            if (change.X is int x) { tile.X = x; Track(key + ".x", modName); }
+            if (change.Y is int y) { tile.Y = y; Track(key + ".y", modName); }
+            if (change.SourceX is int sourceX) { tile.SourceX = sourceX; Track(key + ".sourceX", modName); }
+            if (change.SourceY is int sourceY) { tile.SourceY = sourceY; Track(key + ".sourceY", modName); }
+            if (change.Width is uint width) { tile.Width = width; Track(key + ".width", modName); }
+            if (change.Height is uint height) { tile.Height = height; Track(key + ".height", modName); }
+            if (change.Depth is int depth) { tile.TileDepth = depth; Track(key + ".depth", modName); }
+            if (change.ScaleX is float scaleX) { tile.ScaleX = scaleX; Track(key + ".scaleX", modName); }
+            if (change.ScaleY is float scaleY) { tile.ScaleY = scaleY; Track(key + ".scaleY", modName); }
+            if (change.Color is uint color) { tile.Color = color; Track(key + ".color", modName); }
+        }
+
+        foreach (RoomTileJson add in tiles.Add)
+        {
+            room.Tiles.Add(new UndertaleRoom.Tile
+            {
+                InstanceID = data.GeneralInfo.LastTile++,
+                BackgroundDefinition = Background(add.Background!),
+                X = add.X ?? 0,
+                Y = add.Y ?? 0,
+                SourceX = add.SourceX ?? 0,
+                SourceY = add.SourceY ?? 0,
+                Width = add.Width ?? 0,
+                Height = add.Height ?? 0,
+                TileDepth = add.Depth ?? 0,
+                ScaleX = add.ScaleX ?? 1,
+                ScaleY = add.ScaleY ?? 1,
+                Color = add.Color ?? 0xFFFFFFFF
+            });
+        }
+    }
+
+    private UndertaleBackground Background(string name) =>
+        data.Backgrounds.ByName(name) ?? throw new InvalidOperationException($"Background '{name}' doesn't exist.");
 
     private static UndertaleRoom.Layer? FindLayer(UndertaleRoom room, string name) =>
         RoomLayers.InstanceLayers(room).FirstOrDefault(l => l.LayerName?.Content == name);

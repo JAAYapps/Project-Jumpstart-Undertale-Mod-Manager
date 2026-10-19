@@ -84,7 +84,7 @@ public sealed class TextureRepacker
     /// <paramref name="overridesDir"/> (flat naming, see file header) replace
     /// any base asset with the same name and add brand-new sprites.
     /// </summary>
-    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes = null)
+    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes = null, IReadOnlySet<string>? newBackgrounds = null)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
         if (!Directory.Exists(overridesDir))
@@ -105,6 +105,8 @@ public sealed class TextureRepacker
             var overrideNames = new HashSet<string>();
             
             await ExportExistingAsync(data, texturesDir, assetCoordinateDict, assetTypeDict);
+            foreach (string name in newBackgrounds ?? new HashSet<string>())
+                assetTypeDict.TryAdd(name, "bg");
 
             // 2. Overlay the mod's overrides (same filename => overwrite => mod wins).
             foreach (string src in Directory.GetFiles(overridesDir, "*.png", SearchOption.AllDirectories))
@@ -453,7 +455,7 @@ public sealed class TextureRepacker
         UndertaleBackground bg = data.Backgrounds.ByName(name);
         if (bg is null)
         {
-            warnings.Add($"Background '{name}' not found in data; skipped. (Creating new backgrounds isn't supported yet.)");
+            data.Backgrounds.Add(new UndertaleBackground { Name = data.Strings.MakeString(name), Texture = pageItem });
             return;
         }
         bg.Texture = pageItem;
