@@ -84,7 +84,7 @@ public sealed class TextureRepacker
     /// <paramref name="overridesDir"/> (flat naming, see file header) replace
     /// any base asset with the same name and add brand-new sprites.
     /// </summary>
-    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir)
+    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes = null)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
         if (!Directory.Exists(overridesDir))
@@ -151,7 +151,7 @@ public sealed class TextureRepacker
             
             // 5. Rebuild the graph from the packed atlases.
             warnings.AddRange(packer.Errors);
-            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, overrideNames, warnings);
+            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, overrideNames, spriteBoxes, warnings);
             KeepUnpackedOriginals(data, warnings);
 
             // Repoint TextureGroupInfo (TGIN) at the freshly-built pages. The old page
@@ -271,6 +271,7 @@ public sealed class TextureRepacker
         Dictionary<string, int[]> coords,
         Dictionary<string, string> types,
         HashSet<string> overrideNames,
+        IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes,
         List<string> warnings)
     {
         int lastTextPage = data.EmbeddedTextures.Count - 1;
@@ -316,7 +317,7 @@ public sealed class TextureRepacker
                 if (assetType is null)
                     continue; // unknown name — warning already recorded
 
-                RestoreTargetBounds(pageItem, stripped, n, coords, overrideNames.Contains(stripped));
+                RestoreTargetBounds(pageItem, stripped, n, coords, overrideNames.Contains(stripped), assetType == "spr" ? SpriteBox(stripped, spriteBoxes) : null);
 
                 switch (assetType)
                 {
@@ -391,9 +392,25 @@ public sealed class TextureRepacker
         };
     }
 
-    private static void RestoreTargetBounds(
-        UndertaleTexturePageItem tex, string name, Node n, Dictionary<string, int[]> coords, bool fromMod)
+    private static (uint Width, uint Height)? SpriteBox(string frameName, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes)
     {
+        int underscore = frameName.LastIndexOf('_');
+        return underscore > 0 && spriteBoxes is not null && spriteBoxes.TryGetValue(frameName[..underscore], out var box) ? box : null;
+    }
+
+    private static void RestoreTargetBounds(
+        UndertaleTexturePageItem tex, string name, Node n, Dictionary<string, int[]> coords, bool fromMod, (uint Width, uint Height)? newBox)
+    {
+        if (fromMod && newBox is { } box && n.Bounds.Width == box.Width && n.Bounds.Height == box.Height)
+        {
+            tex.TargetX = 0;
+            tex.TargetY = 0;
+            tex.TargetWidth = (ushort)box.Width;
+            tex.TargetHeight = (ushort)box.Height;
+            tex.BoundingWidth = (ushort)box.Width;
+            tex.BoundingHeight = (ushort)box.Height;
+            return;
+        }
         if (coords.TryGetValue(name, out int[]? c) && fromMod && n.Bounds.Width == c[4] && n.Bounds.Height == c[5])
         {
             tex.TargetX = 0;
@@ -402,6 +419,15 @@ public sealed class TextureRepacker
             tex.TargetHeight = (ushort)c[5];
             tex.BoundingWidth = (ushort)c[4];
             tex.BoundingHeight = (ushort)c[5];
+        }
+        else if (c is not null && fromMod && (n.Bounds.Width != c[2] || n.Bounds.Height != c[3]))
+        {
+            tex.TargetX = 0;
+            tex.TargetY = 0;
+            tex.TargetWidth = (ushort)n.Bounds.Width;
+            tex.TargetHeight = (ushort)n.Bounds.Height;
+            tex.BoundingWidth = (ushort)n.Bounds.Width;
+            tex.BoundingHeight = (ushort)n.Bounds.Height;
         }
         else if (c is not null)
         {

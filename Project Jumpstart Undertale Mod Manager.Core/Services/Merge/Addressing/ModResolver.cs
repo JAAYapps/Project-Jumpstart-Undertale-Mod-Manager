@@ -54,7 +54,9 @@ public static class ModResolver
         if (addr.Category == AssetCategory.Files)
             return new ResolvedAsset(ResolutionKind.Replace, addr, null, null);
 
-        string category = addr.Category.ToString().ToLowerInvariant();
+        string category = addr.Category is AssetCategory.SpriteMasks or AssetCategory.SpriteInfo
+            ? "sprites"
+            : addr.Category.ToString().ToLowerInvariant();
         string name = addr.AssetName;
 
         object? existing = LookupByName(addr.Category, data, name, out bool categorySupported);
@@ -102,6 +104,8 @@ public static class ModResolver
         switch (category)
         {
             case AssetCategory.Sprites:     return data.Sprites.ByName(name);
+            case AssetCategory.SpriteMasks: return data.Sprites.ByName(name);
+            case AssetCategory.SpriteInfo:  return data.Sprites.ByName(name);
             case AssetCategory.Backgrounds: return data.Backgrounds.ByName(name);
             case AssetCategory.Fonts:       return data.Fonts.ByName(name);
             case AssetCategory.Code:        return data.Code.ByName(name);
@@ -118,7 +122,7 @@ public static class ModResolver
     // Returns the conflicting type's name, or null. Powers the lie-trap message.
     private static string? FindConflictingType(AssetCategory addressed, UndertaleData data, string name)
     {
-        if (addressed != AssetCategory.Sprites     && data.Sprites.ByName(name)     is not null) return "sprite";
+        if (addressed is not (AssetCategory.Sprites or AssetCategory.SpriteMasks or AssetCategory.SpriteInfo) && data.Sprites.ByName(name) is not null) return "sprite";
         if (addressed != AssetCategory.Backgrounds && data.Backgrounds.ByName(name) is not null) return "background";
         if (addressed != AssetCategory.Fonts       && data.Fonts.ByName(name)       is not null) return "font";
         if (addressed != AssetCategory.Code        && data.Code.ByName(name)        is not null) return "code";

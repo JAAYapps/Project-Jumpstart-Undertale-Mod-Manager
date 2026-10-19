@@ -220,6 +220,36 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             gamePatches.Add((go, json));
         }
 
+        var spriteInfos = new Dictionary<string, (SpriteJson Json, string Mod)>();
+        foreach (PlannedAsset pa in plan.Values.Where(p => p.Address.Category == AssetCategory.SpriteInfo))
+        {
+            try
+            {
+                spriteInfos[pa.Address.AssetName] = (Sprites.SpriteImporter.ReadJson(pa.SourceFile), pa.OwningMod);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(pa.OwningMod, $"cannot apply {pa.Address.RelativePath}: {ex.Message}");
+            }
+        }
+        var spriteBoxes = spriteInfos.Where(kv => kv.Value.Json.Width is not null && kv.Value.Json.Height is not null)
+                                     .ToDictionary(kv => kv.Key, kv => (kv.Value.Json.Width!.Value, kv.Value.Json.Height!.Value));
+        var spriteMasks = new Dictionary<string, (List<(int Index, string File)> Files, string Mod)>();
+        foreach (PlannedAsset pa in plan.Values.Where(p => p.Address.Category == AssetCategory.SpriteMasks))
+        {
+            ModSource owner = mods.First(m => m.Name == pa.OwningMod);
+            var files = new List<(int Index, string File)>();
+            foreach (string file in EnumerateModFiles(owner, manifests[owner.Name]))
+            {
+                if (!ModAddressParser.TryParse(ToModRelative(owner, file), out ModAddress? a, out _)) continue;
+                if (target is not null && !target.Accepts(a)) continue;
+                a = renames.Alias(a, owner.Name);
+                if (a.Category == AssetCategory.SpriteMasks && a.AssetName == pa.Address.AssetName && a.Container == pa.Address.Container)
+                    files.Add((a.Frame!.Value, file));
+            }
+            spriteMasks[pa.Address.AssetName] = (files, owner.Name);
+        }
+
         string dataDir = Path.GetFullPath(gameDir);
         string sharedDir = Path.GetFullPath(gameRoot ?? gameDir);
         HashSet<string> mergeWrittenFiles = MergeWrittenFiles(data, dataDir);
@@ -346,7 +376,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
             if (anyTexture)
             {
-                RepackResult rr = await _repacker.RepackAsync(data, overridesDir);
+                RepackResult rr = await _repacker.RepackAsync(data, overridesDir, spriteBoxes);
                 warnings.AddRange(rr.Warnings);
             }
         }
@@ -355,6 +385,24 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             TryDelete(overridesDir);
         }
         
+        foreach (string spriteName in spriteInfos.Keys.Union(spriteMasks.Keys))
+        {
+            bool hasInfo = spriteInfos.TryGetValue(spriteName, out var info);
+            bool hasMasks = spriteMasks.TryGetValue(spriteName, out var masks);
+            string owner = hasInfo ? info.Mod : masks.Mod;
+            UndertaleSprite? sprite = data.Sprites.ByName(spriteName);
+            if (sprite is null)
+                return MergeResult.Fail(owner, $"sprite '{spriteName}' has a sprite.json or masks, but no frames, and isn't in this game.");
+            try
+            {
+                Sprites.SpriteImporter.Apply(data, sprite, hasInfo ? info.Json : null, hasMasks ? masks.Files : [], warnings, owner);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(owner, $"failed applying sprite {spriteName}: {ex.Message}");
+            }
+        }
+
         // Note: Event connect to gml scripts and if a newly created object ties to connect an event that is missing (gml code script added in code section), may result in an object build failure
         
         // === PHASE 5c: objects -> CodeImportGroup ================================
