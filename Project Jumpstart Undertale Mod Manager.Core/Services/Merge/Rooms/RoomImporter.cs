@@ -31,6 +31,14 @@ public sealed class RoomImporter(UndertaleData data)
         }
     }
 
+    public static UndertaleRoom CreateEmptyRoom(UndertaleData data, string name)
+    {
+        var room = new UndertaleRoom { Name = data.Strings.MakeString(name), Caption = data.Strings.MakeString("") };
+        data.Rooms.Add(room);
+        data.GeneralInfo.RoomOrder.Add(new(room));
+        return room;
+    }
+
     public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds, ISet<string> newCode)
     {
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)

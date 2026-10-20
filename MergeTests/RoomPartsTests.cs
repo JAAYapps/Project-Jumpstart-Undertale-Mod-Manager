@@ -200,6 +200,110 @@ public class RoomPartsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_new_room_is_created_at_the_end_filled_in_and_code_can_go_to_it()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        string objectName = probe.GameObjects.First(o => o?.Name?.Content is not null).Name.Content;
+        int roomsBefore = probe.Rooms.Count;
+        const string room = "room_pjum_new";
+        string mod = Mod(probe, "NewRoomMod", room,
+            "{ \"settings\": { \"width\": 400, \"height\": 300, \"persistent\": true }, " +
+            "\"views\": [ { \"slot\": 0, \"enabled\": true, \"viewX\": 0, \"viewY\": 0, \"viewWidth\": 320, \"viewHeight\": 240, \"portX\": 0, \"portY\": 0, \"portWidth\": 640, \"portHeight\": 480, \"borderX\": 32, \"borderY\": 32, \"speedX\": -1, \"speedY\": -1 } ], " +
+            "\"add\": [ { \"object\": \"" + objectName + "\", \"x\": 10, \"y\": 20 }, { \"object\": \"" + objectName + "\", \"x\": 30, \"y\": 40, \"creationCode\": \"gml_RoomCC_room_pjum_new_1_Create\" } ] }",
+            "\"rooms\": { \"" + room + "\": {} }, \"code\": { \"gml_Script_pjum_go_new\": {} }");
+        string codeDir = Path.Combine(TestPaths.ModRoot(mod, probe), "code");
+        Directory.CreateDirectory(codeDir);
+        File.WriteAllText(Path.Combine(codeDir, "gml_RoomCC_room_pjum_new_1_Create.gml"), "pjum_new_room_marker = 1;\n");
+        File.WriteAllText(Path.Combine(codeDir, "gml_Script_pjum_go_new.gml"), "room_goto(room_pjum_new);\n");
+        string game = Game(src);
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("NewRoomMod", mod) });
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(result.Success, result.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        Assert.Equal(roomsBefore + 1, after.Rooms.Count);
+        UndertaleRoom r = after.Rooms[^1];
+        Assert.Equal(room, r.Name.Content);
+        Assert.Same(r, after.GeneralInfo.RoomOrder[^1].Resource);
+        Assert.Equal((400u, 300u, true), (r.Width, r.Height, r.Persistent));
+        Assert.Equal((true, 320, 640), (r.Views[0].Enabled, r.Views[0].ViewWidth, r.Views[0].PortWidth));
+        Assert.Equal(new[] { (10, 20), (30, 40) }, r.GameObjects.Select(g => (g.X, g.Y)));
+        Assert.Equal("gml_RoomCC_room_pjum_new_1_Create", r.GameObjects[1].CreationCode?.Name?.Content);
+        UndertaleCode go = after.Code.ByName("gml_Script_pjum_go_new");
+        Assert.Contains(go.Instructions, i => i.Kind == UndertaleInstruction.Opcode.PushI && i.ValueShort == after.Rooms.Count - 1
+                                            || i.Kind == UndertaleInstruction.Opcode.Push && i.ValueInt == after.Rooms.Count - 1);
+    }
+
+    [Fact]
+    public async Task A_room_that_is_neither_in_the_game_nor_declared_new_fails()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        string mod = Mod(probe, "UndeclaredRoomMod", "room_pjum_undeclared", "{ }");
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(Game(src), new List<ModSource> { new("UndeclaredRoomMod", mod) });
+
+        Assert.False(result.Success);
+        Assert.Contains("isn't declared in mod.json > newAssets.rooms", result.Reason);
+    }
+
+    [Fact]
+    public async Task A_new_room_in_a_layered_game_is_refused()
+    {
+        string? chapter = TestPaths.DeltaruneChapter;
+        if (chapter is null) { _out.WriteLine("Deltarune chapter not found — skipping."); return; }
+        string src = Path.Combine(chapter, "data.win");
+        UndertaleData probe = Load(src);
+        string mod = Mod(probe, "LayeredRoomMod", "room_pjum_layered", "{ }", "\"rooms\": { \"room_pjum_layered\": {} }");
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(Game(src), new List<ModSource> { new("LayeredRoomMod", mod) });
+
+        Assert.False(result.Success);
+        Assert.Contains("can only create rooms in GameMaker 1 games", result.Reason);
+    }
+
+    [Fact]
+    public async Task A_new_room_extracts_and_rebuilds()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData original = Load(src);
+        UndertaleData modded = Load(src);
+        var room = new UndertaleRoom { Name = modded.Strings.MakeString("room_pjum_extracted"), Caption = modded.Strings.MakeString(""), Width = 500, Speed = 60 };
+        UndertaleGameObject obj = modded.GameObjects.First(o => o?.Name?.Content is not null);
+        room.GameObjects.Add(new UndertaleRoom.GameObject { InstanceID = modded.GeneralInfo.LastObj++, ObjectDefinition = obj, X = 5, Y = 6 });
+        room.GameObjects.Add(new UndertaleRoom.GameObject { InstanceID = modded.GeneralInfo.LastObj++, ObjectDefinition = obj, X = 7, Y = 8 });
+        room.Views[1].Enabled = true;
+        room.Views[1].ViewX = 99;
+        modded.Rooms.Add(room);
+        modded.GeneralInfo.RoomOrder.Add(new(room));
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "ExtractedNewRoom");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Extracted new room");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+
+        Assert.DoesNotContain(result.NotConverted, n => n.Contains("room_pjum_extracted"));
+        Assert.Contains("\"room_pjum_extracted\": {}", File.ReadAllText(Path.Combine(mod, "mod.json")).Replace("\n", "").Replace("  ", ""));
+
+        string game = Game(src);
+        MergeResult merge = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("Extracted new room", mod) });
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        UndertaleRoom r = after.Rooms.ByName("room_pjum_extracted");
+        Assert.Equal(after.Rooms.Count - 1, after.Rooms.IndexOf(r));
+        Assert.Equal((500u, room.Height, 60u), (r.Width, r.Height, r.Speed));
+        static string View(UndertaleRoom.View v) => $"{v.Enabled} {v.ViewX},{v.ViewY},{v.ViewWidth},{v.ViewHeight} {v.PortX},{v.PortY},{v.PortWidth},{v.PortHeight}";
+        Assert.Equal(room.Views.Select(View), r.Views.Select(View));
+        Assert.Equal(room.GameObjects.Select(g => (g.ObjectDefinition.Name.Content, g.X, g.Y)), r.GameObjects.Select(g => (g.ObjectDefinition.Name.Content, g.X, g.Y)));
+    }
+
+    [Fact]
     public async Task Room_parts_and_a_new_background_extract_and_rebuild_the_room()
     {
         string? src = TestPaths.UndertaleDataWin;

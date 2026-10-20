@@ -194,6 +194,14 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         {
             if (!Path.GetExtension(ro.SourceFile).Equals(".json", StringComparison.OrdinalIgnoreCase))
                 return MergeResult.Fail(ro.OwningMod, $"room file {ro.Address.RelativePath} must be a .json patch.");
+            if (data.Rooms.ByName(ro.Address.AssetName) is null)
+            {
+                if (!manifests[ro.OwningMod].DeclaresNew("rooms", ro.Address.AssetName, out _))
+                    return MergeResult.Fail(ro.OwningMod, $"room '{ro.Address.AssetName}' doesn't exist in this game and isn't declared in mod.json > newAssets.rooms.");
+                if (data.IsGameMaker2())
+                    return MergeResult.Fail(ro.OwningMod, $"room '{ro.Address.AssetName}' is new, but PJUM can only create rooms in GameMaker 1 games so far.");
+                Rooms.RoomImporter.CreateEmptyRoom(data, ro.Address.AssetName);
+            }
             try
             {
                 RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
