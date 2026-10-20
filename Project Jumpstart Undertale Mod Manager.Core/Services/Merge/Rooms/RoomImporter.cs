@@ -64,6 +64,8 @@ public sealed class RoomImporter(UndertaleData data)
             if (string.IsNullOrEmpty(add.Object))
                 throw new InvalidOperationException($"An added instance in room '{room.Name.Content}' has no \"object\".");
             CheckObject(add.Object, $"An added instance in room '{room.Name.Content}'");
+            if (add.After is uint after && after != 0)
+                CheckId(after, "\"after\"");
             if (add.Layer is not null && (!layered || FindLayer(room, add.Layer) is null))
                 throw new InvalidOperationException($"Room '{room.Name.Content}' has no instance layer named '{add.Layer}'.");
         }
@@ -112,6 +114,8 @@ public sealed class RoomImporter(UndertaleData data)
             }
             foreach (RoomTileJson add in tiles.Add)
             {
+                if (add.After is uint after && after != 0)
+                    CheckTile(after, "\"after\"");
                 if (add.Id is not null)
                     throw new InvalidOperationException($"An added tile in room '{room.Name.Content}' has \"id\": {add.Id}. Added tiles get their id from the merge; remove \"id\", or move it to \"change\".");
                 if (string.IsNullOrEmpty(add.Background))
@@ -194,7 +198,7 @@ public sealed class RoomImporter(UndertaleData data)
                 CreationCode = Code(add.CreationCode),
                 PreCreateCode = Code(add.PreCreateCode)
             };
-            room.GameObjects.Add(instance);
+            room.GameObjects.Insert(InsertIndex(room.GameObjects, g => g.InstanceID, add.After, $"{roomKey}#instances", room.Name.Content, "instance", modName), instance);
             room.InstanceCreationOrderIDs?.InstanceIDs.Add(instance.InstanceID);
 
             if (room.Layers is { Count: > 0 })
@@ -301,7 +305,7 @@ public sealed class RoomImporter(UndertaleData data)
 
         foreach (RoomTileJson add in tiles.Add)
         {
-            room.Tiles.Add(new UndertaleRoom.Tile
+            room.Tiles.Insert(InsertIndex(room.Tiles, t => t.InstanceID, add.After, $"{roomKey}#tiles", room.Name.Content, "tile", modName), new UndertaleRoom.Tile
             {
                 InstanceID = data.GeneralInfo.LastTile++,
                 BackgroundDefinition = Background(add.Background!),
@@ -317,6 +321,28 @@ public sealed class RoomImporter(UndertaleData data)
                 Color = add.Color ?? 0xFFFFFFFF
             });
         }
+    }
+
+    private readonly Dictionary<(string List, uint After), int> _insertedAfter = new();
+
+    private int InsertIndex<T>(IList<T> list, Func<T, uint> idOf, uint? after, string listKey, string room, string kind, string modName)
+    {
+        if (after is not uint anchor)
+            return list.Count;
+        int anchorIndex = -1;
+        if (anchor != 0)
+        {
+            for (int i = 0; i < list.Count; i++)
+                if (idOf(list[i]) == anchor) { anchorIndex = i; break; }
+            if (anchorIndex < 0)
+            {
+                Warnings.Add($"[{modName}] places a new {kind} after {kind} {anchor} in room '{room}', but that {kind} was removed; it was added at the end.");
+                return list.Count;
+            }
+        }
+        int already = _insertedAfter.GetValueOrDefault((listKey, anchor));
+        _insertedAfter[(listKey, anchor)] = already + 1;
+        return Math.Min(list.Count, anchorIndex + 1 + already);
     }
 
     private UndertaleCode? Code(string? name) =>

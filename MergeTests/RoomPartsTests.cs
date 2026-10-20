@@ -166,6 +166,40 @@ public class RoomPartsTests : IDisposable
     }
 
     [Fact]
+    public async Task Added_tiles_and_instances_in_the_middle_extract_and_rebuild_in_the_same_order()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData original = Load(src);
+        UndertaleData modded = Load(src);
+        UndertaleRoom room = modded.Rooms.First(r => r?.Tiles.Count >= 4 && r.GameObjects.Count >= 4 && r.Tiles.All(t => t.BackgroundDefinition is not null) && r.GameObjects.All(g => g.ObjectDefinition is not null));
+        UndertaleBackground bg = room.Tiles[0].BackgroundDefinition;
+        room.Tiles.Insert(0, new UndertaleRoom.Tile { InstanceID = modded.GeneralInfo.LastTile++, BackgroundDefinition = bg, X = 1, Width = 20, Height = 20, TileDepth = 7 });
+        room.Tiles.Insert(3, new UndertaleRoom.Tile { InstanceID = modded.GeneralInfo.LastTile++, BackgroundDefinition = bg, X = 2, Width = 20, Height = 20, TileDepth = 7 });
+        room.Tiles.Insert(4, new UndertaleRoom.Tile { InstanceID = modded.GeneralInfo.LastTile++, BackgroundDefinition = bg, X = 3, Width = 20, Height = 20, TileDepth = 7 });
+        room.Tiles.Add(new UndertaleRoom.Tile { InstanceID = modded.GeneralInfo.LastTile++, BackgroundDefinition = bg, X = 4, Width = 20, Height = 20, TileDepth = 7 });
+        UndertaleGameObject obj = room.GameObjects[0].ObjectDefinition;
+        room.GameObjects.Insert(2, new UndertaleRoom.GameObject { InstanceID = modded.GeneralInfo.LastObj++, ObjectDefinition = obj, X = 11 });
+        room.GameObjects.Insert(0, new UndertaleRoom.GameObject { InstanceID = modded.GeneralInfo.LastObj++, ObjectDefinition = obj, X = 12 });
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "OrderMod");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Order mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+
+        string game = Game(src);
+        MergeResult merge = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("Order mod", mod) });
+        foreach (string w in merge.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleRoom r = Load(Path.Combine(game, "data.win")).Rooms.ByName(room.Name.Content);
+        static string Tile(UndertaleRoom.Tile t) => $"{t.BackgroundDefinition?.Name?.Content} {t.X},{t.Y} {t.SourceX},{t.SourceY} {t.Width}x{t.Height} {t.TileDepth}";
+        static string Inst(UndertaleRoom.GameObject g) => $"{g.ObjectDefinition?.Name?.Content} {g.X},{g.Y}";
+        Assert.Equal(room.Tiles.Select(Tile), r.Tiles.Select(Tile));
+        Assert.Equal(room.GameObjects.Select(Inst), r.GameObjects.Select(Inst));
+    }
+
+    [Fact]
     public async Task Room_parts_and_a_new_background_extract_and_rebuild_the_room()
     {
         string? src = TestPaths.UndertaleDataWin;

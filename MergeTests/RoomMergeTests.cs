@@ -231,6 +231,33 @@ public class RoomMergeTests : IDisposable
     }
 
     [Fact]
+    public async Task Added_instances_go_after_the_instance_they_name()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        UndertaleRoom room = PickRoom(probe);
+        uint first = room.GameObjects[0].InstanceID, second = room.GameObjects[1].InstanceID;
+        string objectName = room.GameObjects[2].ObjectDefinition.Name.Content;
+        string Add(int x, string after) => "{ \"object\": \"" + objectName + "\", \"x\": " + x + ", \"y\": 0" + after + " }";
+        string modA = Mod(probe, "OrderA", room.Name.Content,
+            "{ \"remove\": [ " + second + " ], \"add\": [ " + Add(901, ", \"after\": " + first) + ", " + Add(902, ", \"after\": " + first) + ", " + Add(903, ", \"after\": 0") + " ] }");
+        string modB = Mod(probe, "OrderB", room.Name.Content, "{ \"add\": [ " + Add(904, ", \"after\": " + second) + " ] }");
+        string game = Game(src);
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("OrderA", modA), new("OrderB", modB) });
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(result.Success, result.Reason);
+
+        UndertaleRoom r = Load(Path.Combine(game, "data.win")).Rooms.ByName(room.Name.Content);
+        Assert.Equal(903, r.GameObjects[0].X);
+        Assert.Equal(first, r.GameObjects[1].InstanceID);
+        Assert.Equal((901, 902), (r.GameObjects[2].X, r.GameObjects[3].X));
+        Assert.Equal(904, r.GameObjects[^1].X);
+        Assert.Contains(result.Warnings, w => w.Contains("[OrderB]") && w.Contains($"after instance {second}") && w.Contains("added at the end"));
+    }
+
+    [Fact]
     public async Task In_a_layered_game_an_added_instance_goes_into_the_layer_with_its_depth()
     {
         string? chapter = TestPaths.DeltaruneChapter;
