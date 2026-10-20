@@ -162,6 +162,26 @@ public class RenameTests : IDisposable
     }
 
     [Fact]
+    public void Two_swapped_objects_are_noted_and_not_treated_as_renames()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData original = Load(src);
+        UndertaleData modded = Load(src);
+        const int a = 20, b = 21;
+        string first = modded.GameObjects[a].Name.Content, second = modded.GameObjects[b].Name.Content;
+        (modded.GameObjects[a], modded.GameObjects[b]) = (modded.GameObjects[b], modded.GameObjects[a]);
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "SwapMod");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Swap mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+
+        Assert.Contains(result.NotConverted, n => n.Contains("2 objects changed number") && n.Contains($"'{first}' ({a} -> {b})") && n.Contains($"'{second}' ({b} -> {a})"));
+        Assert.DoesNotContain("renames", File.ReadAllText(Path.Combine(mod, "mod.json")));
+    }
+
+    [Fact]
     public async Task A_renamed_sprite_is_extracted_as_a_rename_and_rebuilds_the_modded_game()
     {
         string? src = TestPaths.UndertaleDataWin;

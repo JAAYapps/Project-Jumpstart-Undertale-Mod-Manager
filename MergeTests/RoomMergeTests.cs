@@ -182,6 +182,55 @@ public class RoomMergeTests : IDisposable
     }
 
     [Fact]
+    public async Task An_added_instance_runs_creation_code_from_the_mods_code_folder()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        UndertaleRoom room = PickRoom(probe);
+        string objectName = room.GameObjects[2].ObjectDefinition.Name.Content;
+        const string codeName = "gml_RoomCC_pjum_added_Create";
+        string mod = Mod(probe, "CreationCodeMod", room.Name.Content,
+            "{ \"add\": [ { \"object\": \"" + objectName + "\", \"x\": 1, \"y\": 2, \"creationCode\": \"" + codeName + "\" } ], " +
+            "\"change\": [ { \"id\": " + room.GameObjects[0].InstanceID + ", \"creationCode\": \"\" } ] }");
+        string codeDir = Path.Combine(TestPaths.ModRoot(mod, probe), "code");
+        Directory.CreateDirectory(codeDir);
+        File.WriteAllText(Path.Combine(codeDir, codeName + ".gml"), "pjum_added_marker = 3;\n");
+        string game = Game(src);
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("CreationCodeMod", mod) });
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(result.Success, result.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        UndertaleRoom r = after.Rooms.ByName(room.Name.Content);
+        UndertaleCode code = r.GameObjects[^1].CreationCode;
+        Assert.Equal(codeName, code?.Name?.Content);
+        string text = new Underanalyzer.Decompiler.DecompileContext(new UndertaleModLib.Decompiler.GlobalDecompileContext(after), code, after.ToolInfo.DecompilerSettings).DecompileToString();
+        Assert.Contains("pjum_added_marker = 3;", text);
+        Assert.Null(r.GameObjects.Single(g => g.InstanceID == room.GameObjects[0].InstanceID).CreationCode);
+    }
+
+    [Fact]
+    public async Task Creation_code_that_no_mod_provides_fails_before_anything_is_written()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        UndertaleRoom room = PickRoom(probe);
+        string mod = Mod(probe, "MissingCodeMod", room.Name.Content,
+            "{ \"add\": [ { \"object\": \"" + room.GameObjects[2].ObjectDefinition.Name.Content + "\", \"creationCode\": \"gml_RoomCC_pjum_nowhere_Create\" } ] }");
+        string game = Game(src);
+        byte[] before = File.ReadAllBytes(Path.Combine(game, "data.win"));
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("MissingCodeMod", mod) });
+
+        Assert.False(result.Success);
+        Assert.Contains("uses code 'gml_RoomCC_pjum_nowhere_Create', which doesn't exist", result.Reason);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(game, "data.win")));
+    }
+
+    [Fact]
     public async Task In_a_layered_game_an_added_instance_goes_into_the_layer_with_its_depth()
     {
         string? chapter = TestPaths.DeltaruneChapter;

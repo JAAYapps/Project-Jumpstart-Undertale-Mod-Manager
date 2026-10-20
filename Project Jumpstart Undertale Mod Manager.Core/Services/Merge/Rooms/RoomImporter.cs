@@ -31,7 +31,7 @@ public sealed class RoomImporter(UndertaleData data)
         }
     }
 
-    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds)
+    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds, ISet<string> newCode)
     {
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)
                              ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; PJUM can't create rooms yet.");
@@ -48,9 +48,17 @@ public sealed class RoomImporter(UndertaleData data)
                 throw new InvalidOperationException($"{where}: room '{room.Name.Content}' has no instance {id}.");
         }
 
+        void CheckCode(RoomInstanceJson instance, string where)
+        {
+            foreach (string? code in new[] { instance.CreationCode, instance.PreCreateCode })
+                if (!string.IsNullOrEmpty(code) && data.Code.ByName(code) is null && !newCode.Contains(code))
+                    throw new InvalidOperationException($"{where} uses code '{code}', which doesn't exist and isn't one of the mods' code files.");
+        }
+
         bool layered = room.Layers is { Count: > 0 };
         foreach (RoomInstanceJson add in json.Add)
         {
+            CheckCode(add, $"An added instance in room '{room.Name.Content}'");
             if (add.Id is not null)
                 throw new InvalidOperationException($"An added instance in room '{room.Name.Content}' has \"id\": {add.Id}. Added instances get their id from the merge; remove \"id\", or move it to \"change\".");
             if (string.IsNullOrEmpty(add.Object))
@@ -66,6 +74,7 @@ public sealed class RoomImporter(UndertaleData data)
                 throw new InvalidOperationException($"A changed instance in room '{room.Name.Content}' has no \"id\".");
             CheckId(id, "\"change\"");
             CheckObject(change.Object, $"Instance {id} in room '{room.Name.Content}'");
+            CheckCode(change, $"Instance {id} in room '{room.Name.Content}'");
             if (change.Layer is not null)
                 throw new InvalidOperationException($"Instance {id} in room '{room.Name.Content}': moving an instance to another layer isn't supported yet.");
         }
@@ -163,6 +172,8 @@ public sealed class RoomImporter(UndertaleData data)
             if (change.Color is uint color) { instance.Color = color; Track(key + ".color", modName); }
             if (change.ImageIndex is int imageIndex) { instance.ImageIndex = imageIndex; Track(key + ".imageIndex", modName); }
             if (change.ImageSpeed is float imageSpeed) { instance.ImageSpeed = imageSpeed; Track(key + ".imageSpeed", modName); }
+            if (change.CreationCode is string creationCode) { instance.CreationCode = Code(creationCode); Track(key + ".creationCode", modName); }
+            if (change.PreCreateCode is string preCreateCode) { instance.PreCreateCode = Code(preCreateCode); Track(key + ".preCreateCode", modName); }
         }
 
         foreach (RoomInstanceJson add in json.Add)
@@ -179,7 +190,9 @@ public sealed class RoomImporter(UndertaleData data)
                 Rotation = add.Rotation ?? 0,
                 Color = add.Color ?? 0xFFFFFFFF,
                 ImageIndex = add.ImageIndex ?? 0,
-                ImageSpeed = add.ImageSpeed ?? 0
+                ImageSpeed = add.ImageSpeed ?? 0,
+                CreationCode = Code(add.CreationCode),
+                PreCreateCode = Code(add.PreCreateCode)
             };
             room.GameObjects.Add(instance);
             room.InstanceCreationOrderIDs?.InstanceIDs.Add(instance.InstanceID);
@@ -305,6 +318,9 @@ public sealed class RoomImporter(UndertaleData data)
             });
         }
     }
+
+    private UndertaleCode? Code(string? name) =>
+        string.IsNullOrEmpty(name) ? null : data.Code.ByName(name) ?? throw new InvalidOperationException($"Code '{name}' doesn't exist.");
 
     private UndertaleBackground Background(string name) =>
         data.Backgrounds.ByName(name) ?? throw new InvalidOperationException($"Background '{name}' doesn't exist.");

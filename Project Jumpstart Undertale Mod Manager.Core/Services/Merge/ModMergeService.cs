@@ -188,6 +188,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                                                  .Select(kv => kv.Value.Address.AssetName));
         var newBackgrounds = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Backgrounds && resolutions[kv.Key] == ResolutionKind.Create)
                                                      .Select(kv => kv.Value.Address.AssetName));
+        var newCode = new HashSet<string>(codeOps.Select(op => op.Address.AssetName));
         var roomPatches = new List<(PlannedAsset Op, RoomJson Json)>();
         foreach (PlannedAsset ro in roomOps)
         {
@@ -196,7 +197,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             try
             {
                 RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
-                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects, newBackgrounds);
+                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects, newBackgrounds, newCode);
                 roomPatches.Add((ro, json));
             }
             catch (Exception ex)

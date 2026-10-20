@@ -194,7 +194,11 @@ public class ModExtractTests : IDisposable
         room.GameObjects.Remove(removed);
         room.GameObjects.Add(new UndertaleRoom.GameObject { InstanceID = data.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[1].ObjectDefinition, X = 21, Y = 43, ScaleY = 3 });
         var withCode = new UndertaleRoom.GameObject { InstanceID = data.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[1].ObjectDefinition, X = 1, Y = 1 };
-        withCode.CreationCode = UndertaleCode.CreateEmptyEntry(data, $"gml_RoomCC_{room.Name.Content}_{withCode.InstanceID}_Create");
+        string creationName = $"gml_RoomCC_{room.Name.Content}_{withCode.InstanceID}_Create";
+        var creation = new CodeImportGroup(data);
+        creation.QueueReplace(creationName, "pjum_creation_marker = 7;");
+        Assert.True(creation.Import(false).Successful);
+        withCode.CreationCode = data.Code.ByName(creationName);
         room.GameObjects.Add(withCode);
         string modded = Path.Combine(_root, "modded.win");
         await io.SaveAsync(data, modded);
@@ -205,13 +209,15 @@ public class ModExtractTests : IDisposable
         foreach (string note in result.NotConverted) _out.WriteLine("not converted: " + note);
 
         Assert.Equal(1, result.WrittenByCategory["rooms"]);
-        Assert.False(result.WrittenByCategory.ContainsKey("code"));
-        Assert.Contains(result.NotConverted, n => n.Contains($"Added instance {withCode.InstanceID}") && n.Contains("creation code"));
+        Assert.Equal(1, result.WrittenByCategory["code"]);
+        Assert.DoesNotContain(result.NotConverted, n => n.Contains("creation code"));
         JsonNode patch = JsonNode.Parse(File.ReadAllText(Path.Combine(mod, "undertale", "data.win", "rooms", room.Name.Content + ".json")))!;
         Assert.Equal((uint)removed.InstanceID, patch["remove"]![0]!.GetValue<uint>());
         Assert.Equal(moved.X, patch["change"]![0]!["x"]!.GetValue<int>());
         Assert.Null(patch["change"]![0]!["y"]);
-        Assert.Single(patch["add"]!.AsArray());
+        Assert.Equal(2, patch["add"]!.AsArray().Count);
+        Assert.Null(patch["add"]![0]!["creationCode"]);
+        Assert.Equal(creationName, patch["add"]![1]!["creationCode"]!.GetValue<string>());
 
         string game = Path.Combine(_root, "game");
         Directory.CreateDirectory(game);
@@ -221,7 +227,11 @@ public class ModExtractTests : IDisposable
 
         UndertaleRoom rebuilt = (await io.LoadAsync(Path.Combine(game, "data.win"))).Rooms.ByName(room.Name.Content);
         static string Shape(UndertaleRoom.GameObject g) => $"{g.ObjectDefinition?.Name?.Content} {g.X},{g.Y} {g.ScaleX},{g.ScaleY}";
-        Assert.Equal(room.GameObjects.Where(g => g != withCode).Select(Shape), rebuilt.GameObjects.Select(Shape));
+        Assert.Equal(room.GameObjects.Select(Shape), rebuilt.GameObjects.Select(Shape));
+        UndertaleCode rebuiltCreation = rebuilt.GameObjects[^1].CreationCode;
+        Assert.Equal(creationName, rebuiltCreation.Name.Content);
+        UndertaleData rebuiltData = await io.LoadAsync(Path.Combine(game, "data.win"));
+        Assert.Contains("pjum_creation_marker = 7;", Decompile(rebuiltData, creationName));
     }
 
     [Fact]
@@ -279,7 +289,7 @@ public class ModExtractTests : IDisposable
         foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
 
         Assert.False(File.Exists(Path.Combine(mod, "undertale", "data.win", "code", "pjum_shared.gml")));
-        Assert.Contains(result.NotConverted, n => n.Contains("share a name") && n.Contains("'pjum_shared'"));
+        Assert.Contains(result.NotConverted, n => n.Contains("shares a name") && n.Contains("'pjum_shared'"));
         Assert.DoesNotContain(result.NotConverted, n => n.Contains("was removed"));
 
         string game = Path.Combine(_root, "game");
@@ -294,6 +304,44 @@ public class ModExtractTests : IDisposable
             UndertaleCode code = after.GameObjects.ByName(picks[i].Object.Name.Content).Events[(int)EventType.Create][0].Actions[0].CodeId;
             Assert.Equal(expected[i], Decompile(after, code));
         }
+    }
+
+    [Fact]
+    public async Task Oddly_named_creation_code_on_an_added_instance_gets_the_standard_name()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        var io = new DirectDataService();
+        UndertaleData original = await io.LoadAsync(src);
+        UndertaleData modded = await io.LoadAsync(src);
+        UndertaleRoom room = modded.Rooms.First(r => r?.GameObjects.Count >= 2 && r.GameObjects[1].ObjectDefinition is not null);
+        var creation = new CodeImportGroup(modded);
+        creation.QueueReplace("pjum_odd_creation", "pjum_odd_marker = 5;");
+        Assert.True(creation.Import(false).Successful);
+        UndertaleCode odd = modded.Code.ByName("pjum_odd_creation");
+        odd.Name = modded.Strings.MakeString("gml_Object_pjum_weird_layer");
+        var added = new UndertaleRoom.GameObject { InstanceID = modded.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[1].ObjectDefinition, X = 9, Y = 9, CreationCode = odd };
+        room.GameObjects.Add(added);
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "OddCreationMod");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Odd creation mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+
+        string standard = $"gml_RoomCC_{room.Name.Content}_{added.InstanceID}_Create";
+        Assert.True(File.Exists(Path.Combine(mod, "undertale", "data.win", "code", standard + ".gml")));
+        Assert.False(File.Exists(Path.Combine(mod, "undertale", "data.win", "code", "gml_Object_pjum_weird_layer.gml")));
+        Assert.Contains(result.NotConverted, n => n.Contains("isn't named gml_RoomCC_") && n.Contains("'gml_Object_pjum_weird_layer'"));
+
+        string game = Path.Combine(_root, "game");
+        Directory.CreateDirectory(game);
+        File.Copy(src, Path.Combine(game, "data.win"));
+        MergeResult merge = await new ModMergeService(io).ApplyAsync(game, new List<ModSource> { new("Odd creation mod", mod) });
+        Assert.True(merge.Success, merge.Reason);
+        UndertaleData after = await io.LoadAsync(Path.Combine(game, "data.win"));
+        UndertaleCode linked = after.Rooms.ByName(room.Name.Content).GameObjects[^1].CreationCode;
+        Assert.Equal(standard, linked.Name.Content);
+        Assert.Contains("pjum_odd_marker = 5;", Decompile(after, standard));
     }
 
     [Fact]
