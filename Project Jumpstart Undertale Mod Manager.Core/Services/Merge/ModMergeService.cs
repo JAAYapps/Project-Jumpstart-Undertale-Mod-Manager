@@ -85,6 +85,9 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             if (!renames.TryAdd(mod.Name, manifests[mod.Name].Renames, out string renameError))
                 return MergeResult.Fail(mod.Name, renameError);
         renames.Apply();
+        (int Sprites, int Backgrounds, int Sounds, int Objects) firstNew = (data.Sprites.Count, data.Backgrounds.Count, data.Sounds.Count, data.GameObjects.Count);
+        List<string> NewAssetOrder(string category) =>
+            mods.SelectMany(m => manifests[m.Name].NewAssets.TryGetValue(category, out var byName) ? byName.Keys : Enumerable.Empty<string>()).ToList();
 
         // === PHASE 3: gather + parse every address, build the last-wins plan =
         var plan = new Dictionary<string, PlannedAsset>();
@@ -433,9 +436,19 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             }
         }
         
+        OrderNewAssets(data.Sprites, firstNew.Sprites, NewAssetOrder("sprites"));
+        OrderNewAssets(data.Backgrounds, firstNew.Backgrounds, NewAssetOrder("backgrounds"));
+        OrderNewAssets(data.Sounds, firstNew.Sounds, NewAssetOrder("sounds"));
+        OrderNewAssets(data.GameObjects, firstNew.Objects, NewAssetOrder("objects"));
+
         // === PHASE 5d: code -> CodeImportGroup ================================
         if (codeOps.Count > 0)
         {
+            var codeRank = NewAssetOrder("code").Select((name, i) => (name, i)).GroupBy(x => x.name).ToDictionary(x => x.Key, x => x.First().i);
+            var modRank = mods.Select((m, i) => (m.Name, i)).GroupBy(x => x.Name).ToDictionary(x => x.Key, x => x.First().i);
+            codeOps = codeOps.OrderBy(op => modRank.GetValueOrDefault(op.OwningMod))
+                             .ThenBy(op => codeRank.TryGetValue(op.Address.AssetName, out int rank) ? rank : int.MaxValue)
+                             .ToList();
             var group = new CodeImportGroup(data);
             foreach (PlannedAsset co in codeOps)
             {
@@ -548,6 +561,20 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
     // -- helpers ------------------------------------------------------------
 
     private sealed record PlannedAsset(ModAddress Address, string OwningMod, string SourceFile);
+
+    private static void OrderNewAssets<T>(IList<T> assets, int firstNew, List<string> wanted) where T : UndertaleNamedResource
+    {
+        if (firstNew >= assets.Count || wanted.Count == 0)
+            return;
+        var rank = new Dictionary<string, int>();
+        foreach (string name in wanted)
+            rank.TryAdd(name, rank.Count);
+        List<T> ordered = assets.Skip(firstNew)
+                                .OrderBy(a => a?.Name?.Content is string name && rank.TryGetValue(name, out int r) ? r : int.MaxValue)
+                                .ToList();
+        for (int i = 0; i < ordered.Count; i++)
+            assets[firstNew + i] = ordered[i];
+    }
 
     private static readonly HashSet<string> ProgramExtensions = new(StringComparer.OrdinalIgnoreCase)
         { ".exe", ".dll", ".so", ".dylib" };

@@ -162,6 +162,90 @@ public class RenameTests : IDisposable
     }
 
     [Fact]
+    public async Task New_assets_get_numbers_in_the_order_newAssets_lists_them()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData probe = Load(src);
+        string[] sprites = new[] { 5, 2, 7, 0, 3, 6, 1, 4 }.Select(i => $"spr_pjum_order{i}").ToArray();
+        string[] objects = new[] { 3, 0, 4, 1, 2 }.Select(i => $"obj_pjum_order{i}").ToArray();
+        string[] sounds = new[] { 2, 4, 0, 3, 1 }.Select(i => $"snd_pjum_order{i}").ToArray();
+        string Declare(string[] names) => string.Join(", ", names.Select(n => $"\"{n}\": {{}}"));
+        string mod = Path.Combine(_root, "OrderMod");
+        Directory.CreateDirectory(mod);
+        File.WriteAllText(Path.Combine(mod, "mod.json"),
+            "{ \"name\": \"OrderMod\", \"version\": \"1.0.0\", \"newAssets\": { " +
+            $"\"sprites\": {{ {Declare(sprites)} }}, \"objects\": {{ {Declare(objects)} }}, \"sounds\": {{ {Declare(sounds)} }} }} }}");
+        string root = TestPaths.ModRoot(mod, probe);
+        foreach (string sprite in sprites.OrderBy(n => n))
+        {
+            Directory.CreateDirectory(Path.Combine(root, "sprites", sprite));
+            using var image = new MagickImage(MagickColors.Red, 8, 8);
+            image.Write(Path.Combine(root, "sprites", sprite, "0.png"), MagickFormat.Png32);
+        }
+        Directory.CreateDirectory(Path.Combine(root, "objects"));
+        foreach (string obj in objects.OrderBy(n => n))
+            File.WriteAllText(Path.Combine(root, "objects", obj + ".json"), "{ \"visible\": true }");
+        Directory.CreateDirectory(Path.Combine(root, "sounds"));
+        byte[] ogg = File.ReadAllBytes(Directory.GetFiles(Path.GetDirectoryName(src)!, "*.ogg").OrderBy(f => new FileInfo(f).Length).First());
+        foreach (string sound in sounds.OrderBy(n => n))
+        {
+            File.WriteAllText(Path.Combine(root, "sounds", sound + ".json"), "{ \"type\": \".ogg\", \"embedded\": true }");
+            File.WriteAllBytes(Path.Combine(root, "sounds", sound + ".ogg"), ogg);
+        }
+        string game = Game(src);
+
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("OrderMod", mod) });
+        foreach (string w in result.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(result.Success, result.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        Assert.Equal(sprites, after.Sprites.Skip(probe.Sprites.Count).Select(s => s.Name.Content));
+        Assert.Equal(objects, after.GameObjects.Skip(probe.GameObjects.Count).Select(o => o.Name.Content));
+        Assert.Equal(sounds, after.Sounds.Skip(probe.Sounds.Count).Select(s => s.Name.Content));
+    }
+
+    [Fact]
+    public async Task A_nameless_sprite_and_a_sound_without_its_file_keep_the_numbers_after_them()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData original = Load(src);
+        UndertaleData modded = Load(src);
+        UndertaleSprite template = PickSprite(modded);
+        UndertaleSprite NewSprite(string name) => new()
+        {
+            Name = modded.Strings.MakeString(name), Width = template.Width, Height = template.Height,
+            MarginRight = template.MarginRight, MarginBottom = template.MarginBottom,
+            Textures = { new UndertaleSprite.TextureEntry { Texture = template.Textures[0].Texture } }
+        };
+        modded.Sprites.Add(NewSprite(""));
+        modded.Sprites.Add(NewSprite("spr_pjum_after_nameless"));
+        modded.Sounds.Add(new UndertaleSound { Name = modded.Strings.MakeString("snd_pjum_no_file"), Type = modded.Strings.MakeString(".ogg"),
+                                               File = modded.Strings.MakeString("snd_pjum_no_file.ogg"), Flags = UndertaleSound.AudioEntryFlags.Regular, Volume = 1, AudioID = -1 });
+        UndertaleSound embedded = modded.Sounds.First(s => s.Flags.HasFlag(UndertaleSound.AudioEntryFlags.IsEmbedded) && s.AudioFile is not null);
+        modded.Sounds.Add(new UndertaleSound { Name = modded.Strings.MakeString("snd_pjum_after_no_file"), Type = embedded.Type, File = modded.Strings.MakeString("snd_pjum_after_no_file.wav"),
+                                               Flags = embedded.Flags, Volume = 1, AudioFile = embedded.AudioFile, AudioID = embedded.AudioID, AudioGroup = embedded.AudioGroup, GroupID = embedded.GroupID });
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "GapMod");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Gap mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+        Assert.Contains(result.NotConverted, n => n.Contains($"Sprite #{original.Sprites.Count} has no usable name"));
+        Assert.Contains(result.NotConverted, n => n.Contains("'snd_pjum_no_file'") && n.Contains("added without audio"));
+
+        string game = Game(src);
+        MergeResult merge = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("Gap mod", mod) });
+        foreach (string w in merge.Warnings) _out.WriteLine("WARN: " + w);
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        Assert.Equal("spr_pjum_after_nameless", after.Sprites[original.Sprites.Count + 1].Name.Content);
+        Assert.Equal("snd_pjum_no_file", after.Sounds[original.Sounds.Count].Name.Content);
+        Assert.Equal("snd_pjum_after_no_file", after.Sounds[original.Sounds.Count + 1].Name.Content);
+    }
+
+    [Fact]
     public void Two_swapped_objects_are_noted_and_not_treated_as_renames()
     {
         string? src = TestPaths.UndertaleDataWin;
