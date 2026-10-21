@@ -42,7 +42,7 @@ public sealed class RoomImporter(UndertaleData data)
     public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds, ISet<string> newCode)
     {
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)
-                             ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; PJUM can't create rooms yet.");
+                             ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; Room validation failed.");
 
         void CheckObject(string? name, string where)
         {
