@@ -191,6 +191,8 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                                                  .Select(kv => kv.Value.Address.AssetName));
         var newBackgrounds = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Backgrounds && resolutions[kv.Key] == ResolutionKind.Create)
                                                      .Select(kv => kv.Value.Address.AssetName));
+        var newSprites = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category == AssetCategory.Sprites && resolutions[kv.Key] == ResolutionKind.Create)
+                                                 .Select(kv => kv.Value.Address.AssetName));
         var newCode = new HashSet<string>(codeOps.Select(op => op.Address.AssetName));
         var roomPatches = new List<(PlannedAsset Op, RoomJson Json)>();
         foreach (PlannedAsset ro in roomOps)
@@ -201,14 +203,12 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             {
                 if (!manifests[ro.OwningMod].DeclaresNew("rooms", ro.Address.AssetName, out _))
                     return MergeResult.Fail(ro.OwningMod, $"room '{ro.Address.AssetName}' doesn't exist in this game and isn't declared in mod.json > newAssets.rooms.");
-                if (data.IsGameMaker2())
-                    return MergeResult.Fail(ro.OwningMod, $"room '{ro.Address.AssetName}' is new, but PJUM can only create rooms in GameMaker 1 games so far.");
                 Rooms.RoomImporter.CreateEmptyRoom(data, ro.Address.AssetName);
             }
             try
             {
                 RoomJson json = Rooms.RoomImporter.Read(ro.SourceFile);
-                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects, newBackgrounds, newCode);
+                Rooms.RoomImporter.Validate(data, ro.Address, json, newObjects, newBackgrounds, newSprites, newCode);
                 roomPatches.Add((ro, json));
             }
             catch (Exception ex)

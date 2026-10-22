@@ -32,6 +32,9 @@ public static class TestPaths
         }
     }
 
+    public static string? DeltaruneChapterDataWin(int chapter) =>
+        Discover("DELTARUNE", Path.Combine($"chapter{chapter}_windows", "data.win"));
+
     // The folder a test mod's assets go under so they are addressed to the
     // data they will be merged into: <modDir>/<game>/[<chapter>/]<container>.
     // The merge skips files addressed to any other game or chapter.

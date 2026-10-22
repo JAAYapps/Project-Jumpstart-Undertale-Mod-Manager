@@ -33,13 +33,14 @@ public sealed class RoomImporter(UndertaleData data)
 
     public static UndertaleRoom CreateEmptyRoom(UndertaleData data, string name)
     {
-        var room = new UndertaleRoom { Name = data.Strings.MakeString(name), Caption = data.Strings.MakeString("") };
+        UndertaleRoom room = RoomLayers.EmptyRoom(data, text => data.Strings.MakeString(text));
+        room.Name = data.Strings.MakeString(name);
         data.Rooms.Add(room);
         data.GeneralInfo.RoomOrder.Add(new(room));
         return room;
     }
 
-    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds, ISet<string> newCode)
+    public static void Validate(UndertaleData data, ModAddress addr, RoomJson json, ISet<string> newObjects, ISet<string> newBackgrounds, ISet<string> newSprites, ISet<string> newCode)
     {
         UndertaleRoom room = data.Rooms.ByName(addr.AssetName)
                              ?? throw new InvalidOperationException($"Room '{addr.AssetName}' doesn't exist; Room validation failed.");
@@ -63,7 +64,9 @@ public sealed class RoomImporter(UndertaleData data)
                     throw new InvalidOperationException($"{where} uses code '{code}', which doesn't exist and isn't one of the mods' code files.");
         }
 
-        bool layered = room.Layers is { Count: > 0 };
+        bool layered = data.IsGameMaker2() || room.Layers is { Count: > 0 };
+        HashSet<string> newInstanceLayers = ValidateLayers(data, room, json, newBackgrounds, newSprites);
+        var removedLayers = new HashSet<string>(json.RemoveLayers ?? []);
         foreach (RoomInstanceJson add in json.Add)
         {
             CheckCode(add, $"An added instance in room '{room.Name.Content}'");
@@ -74,7 +77,7 @@ public sealed class RoomImporter(UndertaleData data)
             CheckObject(add.Object, $"An added instance in room '{room.Name.Content}'");
             if (add.After is uint after && after != 0)
                 CheckId(after, "\"after\"");
-            if (add.Layer is not null && (!layered || FindLayer(room, add.Layer) is null))
+            if (add.Layer is not null && (!layered || removedLayers.Contains(add.Layer) || FindLayer(room, add.Layer) is null) && !newInstanceLayers.Contains(add.Layer))
                 throw new InvalidOperationException($"Room '{room.Name.Content}' has no instance layer named '{add.Layer}'.");
         }
 
@@ -140,6 +143,146 @@ public sealed class RoomImporter(UndertaleData data)
             foreach (uint id in tiles.Remove)
                 CheckTile(id, "\"tiles.remove\"");
         }
+    }
+
+    private static HashSet<string> ValidateLayers(UndertaleData data, UndertaleRoom room, RoomJson json, ISet<string> newBackgrounds, ISet<string> newSprites)
+    {
+        string roomName = room.Name.Content;
+        var newInstanceLayers = new HashSet<string>();
+        if (json.RemoveLayers is null && json.Layers is null)
+            return newInstanceLayers;
+        if (!data.IsGameMaker2())
+            throw new InvalidOperationException($"Room '{roomName}' has \"layers\", but only GameMaker 2 games have room layers.");
+
+        var removedLayers = new HashSet<string>(json.RemoveLayers ?? []);
+        foreach (string name in removedLayers)
+            if (RoomLayers.Named(room, name) is null)
+                throw new InvalidOperationException($"\"removeLayers\": room '{roomName}' has no layer named '{name}'.");
+
+        void CheckSprite(string? name, string where)
+        {
+            if (!string.IsNullOrEmpty(name) && data.Sprites.ByName(name) is null && !newSprites.Contains(name))
+                throw new InvalidOperationException($"{where} uses sprite '{name}', which doesn't exist and no mod creates it.");
+        }
+
+        var listed = new HashSet<string>();
+        foreach (RoomLayerJson layerJson in json.Layers ?? [])
+        {
+            if (string.IsNullOrEmpty(layerJson.Name))
+                throw new InvalidOperationException($"A layer in room '{roomName}' has no \"name\".");
+            string name = layerJson.Name;
+            string where = $"Layer '{name}' in room '{roomName}'";
+            string inLayer = $"layer '{name}' in room '{roomName}'";
+            if (!listed.Add(name))
+                throw new InvalidOperationException($"{where} is listed twice in \"layers\".");
+            UndertaleRoom.Layer? existing = removedLayers.Contains(name) ? null : RoomLayers.Named(room, name);
+            UndertaleRoom.LayerType type;
+            if (layerJson.New == true)
+            {
+                if (existing is not null)
+                    throw new InvalidOperationException($"{where} is marked \"new\", but the room already has a layer with that name.");
+                if (!Enum.TryParse(layerJson.Type, true, out type) || !RoomLayers.CarriedTypes.Contains(type))
+                    throw new InvalidOperationException($"{where} has \"type\": \"{layerJson.Type}\"; PJUM can create Instances, Tiles, Background, Assets and Path layers.");
+                if (type == UndertaleRoom.LayerType.Instances)
+                    newInstanceLayers.Add(name);
+            }
+            else
+            {
+                if (existing is null)
+                    throw new InvalidOperationException($"Room '{roomName}' has no layer named '{name}'. To add one, give it \"new\": true and a \"type\".");
+                type = existing.LayerType;
+                if (layerJson.Type is not null && (!Enum.TryParse(layerJson.Type, true, out UndertaleRoom.LayerType given) || given != type))
+                    throw new InvalidOperationException($"{where} is a {type} layer, not \"{layerJson.Type}\". To change its type, list it in \"removeLayers\" and add it again as new.");
+            }
+
+            void Only(object? section, string key, UndertaleRoom.LayerType needed)
+            {
+                if (section is not null && type != needed)
+                    throw new InvalidOperationException($"{where} is a {type} layer, so it can't have \"{key}\"; that is for {needed} layers.");
+            }
+            Only(layerJson.Grid, "grid", UndertaleRoom.LayerType.Tiles);
+            Only(layerJson.Background, "background", UndertaleRoom.LayerType.Background);
+            Only(layerJson.Tiles, "tiles", UndertaleRoom.LayerType.Assets);
+            Only(layerJson.Sprites, "sprites", UndertaleRoom.LayerType.Assets);
+
+            if (layerJson.Grid is RoomGridJson grid)
+            {
+                if (!string.IsNullOrEmpty(grid.Tileset) && data.Backgrounds.ByName(grid.Tileset) is null && !newBackgrounds.Contains(grid.Tileset))
+                    throw new InvalidOperationException($"{where} uses tileset '{grid.Tileset}', which doesn't exist and no mod creates it.");
+                uint width = existing?.TilesData?.TilesX ?? 0, height = existing?.TilesData?.TilesY ?? 0;
+                if (grid.Rows is uint[][] rows)
+                {
+                    height = (uint)rows.Length;
+                    width = rows.Length == 0 || rows[0] is null ? 0 : (uint)rows[0].Length;
+                    if (rows.Any(r => r is null || r.Length != width))
+                        throw new InvalidOperationException($"{where}: every row in \"grid.rows\" must have the same number of cells.");
+                }
+                foreach (uint[] cell in grid.Cells ?? [])
+                    if (cell is null || cell.Length != 3 || cell[0] >= width || cell[1] >= height)
+                        throw new InvalidOperationException($"{where}: each \"grid.cells\" entry is [x, y, tile] inside its {width}x{height} grid, not [{string.Join(", ", cell ?? [])}].");
+            }
+
+            if (layerJson.Background is RoomLayerBackgroundJson background)
+                CheckSprite(background.Sprite, where);
+
+            if (layerJson.Tiles is RoomTilesJson tiles)
+            {
+                var tileIds = existing?.AssetsData?.LegacyTiles?.Select(t => t.InstanceID).ToHashSet() ?? [];
+                void CheckTile(uint id, string key)
+                {
+                    if (!tileIds.Contains(id))
+                        throw new InvalidOperationException($"\"{key}\": {inLayer} has no tile {id}.");
+                }
+                foreach (RoomTileJson add in tiles.Add)
+                {
+                    if (add.After is uint after && after != 0)
+                        CheckTile(after, "after");
+                    if (add.Id is not null)
+                        throw new InvalidOperationException($"An added tile in {inLayer} has \"id\": {add.Id}. Added tiles get their id from the merge; remove \"id\", or move it to \"change\".");
+                    if (string.IsNullOrEmpty(add.Sprite))
+                        throw new InvalidOperationException($"An added tile in {inLayer} has no \"sprite\".");
+                    CheckSprite(add.Sprite, $"An added tile in {inLayer}");
+                }
+                foreach (RoomTileJson change in tiles.Change)
+                {
+                    if (change.Id is not uint id)
+                        throw new InvalidOperationException($"A changed tile in {inLayer} has no \"id\".");
+                    CheckTile(id, "tiles.change");
+                    CheckSprite(change.Sprite, $"Tile {id} in room '{roomName}'");
+                }
+                foreach (uint id in tiles.Remove)
+                    CheckTile(id, "tiles.remove");
+            }
+
+            if (layerJson.Sprites is RoomSpritesJson sprites)
+            {
+                var names = existing?.AssetsData?.Sprites?.Select(s => s.Name?.Content).OfType<string>().ToHashSet() ?? [];
+                void CheckName(string? spriteName, string key)
+                {
+                    if (spriteName is null || !names.Contains(spriteName))
+                        throw new InvalidOperationException($"\"{key}\": {inLayer} has no sprite named '{spriteName}'.");
+                }
+                var added = new HashSet<string>();
+                foreach (RoomSpriteJson add in sprites.Add)
+                {
+                    if (string.IsNullOrEmpty(add.Name))
+                        throw new InvalidOperationException($"An added sprite in {inLayer} has no \"name\".");
+                    if ((names.Contains(add.Name) && !sprites.Remove.Contains(add.Name)) || !added.Add(add.Name))
+                        throw new InvalidOperationException($"{where} already has a sprite named '{add.Name}'.");
+                    if (!string.IsNullOrEmpty(add.After))
+                        CheckName(add.After, "after");
+                    CheckSprite(add.Sprite, $"Sprite '{add.Name}' in {inLayer}");
+                }
+                foreach (RoomSpriteJson change in sprites.Change)
+                {
+                    CheckName(change.Name, "sprites.change");
+                    CheckSprite(change.Sprite, $"Sprite '{change.Name}' in {inLayer}");
+                }
+                foreach (string remove in sprites.Remove)
+                    CheckName(remove, "sprites.remove");
+            }
+        }
+        return newInstanceLayers;
     }
 
     public void Apply(ModAddress addr, RoomJson json, string modName)
@@ -231,6 +374,9 @@ public sealed class RoomImporter(UndertaleData data)
             if (settings.BackgroundColor is uint color) { room.BackgroundColor = color; Track(roomKey + ".backgroundColor", modName); }
             if (settings.DrawBackgroundColor is bool draw) { room.DrawBackgroundColor = draw; Track(roomKey + ".drawBackgroundColor", modName); }
             if (settings.Caption is string caption) { room.Caption = data.Strings.MakeString(caption); Track(roomKey + ".caption", modName); }
+            if (settings.EnableViews is bool views) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.EnableViews, views); Track(roomKey + ".enableViews", modName); }
+            if (settings.ClearViewBackground is bool clearView) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.ClearViewBackground, clearView); Track(roomKey + ".clearViewBackground", modName); }
+            if (settings.DoNotClearDisplayBuffer is bool keepDisplay) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.DoNotClearDisplayBuffer, keepDisplay); Track(roomKey + ".doNotClearDisplayBuffer", modName); }
         }
 
         foreach (RoomBackgroundJson slot in json.Backgrounds ?? [])
@@ -270,20 +416,241 @@ public sealed class RoomImporter(UndertaleData data)
             Track($"{roomKey}.view{view.Slot}", modName);
         }
 
-        if (json.Tiles is not RoomTilesJson tiles)
-            return;
+        foreach (string name in json.RemoveLayers ?? [])
+        {
+            string key = $"{roomKey}/layer:{name}";
+            UndertaleRoom.Layer? layer = RoomLayers.Named(room, name);
+            if (layer is null)
+            {
+                if (_removedBy.TryGetValue(key, out string? by) && by != modName)
+                    Warnings.Add($"[{modName}] removes layer '{name}' in room '{room.Name.Content}', but '{by}' already removed it.");
+                continue;
+            }
+            foreach (UndertaleRoom.GameObject instance in layer.InstancesData?.Instances.ToList() ?? [])
+            {
+                RemoveInstance(room, instance);
+                _removedBy[$"{roomKey}#{instance.InstanceID}"] = modName;
+            }
+            room.Layers.Remove(layer);
+            _removedBy[key] = modName;
+            _addedLayers.Remove(key);
+        }
 
+        foreach (RoomLayerJson layerJson in json.Layers ?? [])
+            ApplyLayer(room, roomKey, layerJson, modName);
+
+        if (json.Tiles is RoomTilesJson tiles)
+            ApplyTiles(room.Tiles, tiles, roomKey, $"{roomKey}#tiles", room.Name.Content, modName);
+    }
+
+    private void ApplyLayer(UndertaleRoom room, string roomKey, RoomLayerJson json, string modName)
+    {
+        string name = json.Name!;
+        string key = $"{roomKey}/layer:{name}";
+        UndertaleRoom.Layer? layer = RoomLayers.Named(room, name);
+        if (json.New == true)
+        {
+            UndertaleRoom.LayerType type = Enum.Parse<UndertaleRoom.LayerType>(json.Type!, true);
+            string by = _addedLayers.GetValueOrDefault(key, "another mod");
+            if (layer is not null && layer.LayerType != type)
+            {
+                Warnings.Add($"[{modName}] adds a {type} layer '{name}' in room '{room.Name.Content}', but '{by}' already added a {layer.LayerType} layer with that name; skipped.");
+                return;
+            }
+            if (layer is not null)
+                Warnings.Add($"[{modName}] adds layer '{name}' in room '{room.Name.Content}', but '{by}' already added one with that name; the two were merged into one layer.");
+            else
+            {
+                layer = NewLayer(room, name, type, json.Depth ?? 0);
+                _addedLayers[key] = modName;
+            }
+        }
+        else if (layer is null)
+        {
+            string by = _removedBy.GetValueOrDefault(key, modName);
+            Warnings.Add($"[{modName}] changes layer '{name}' in room '{room.Name.Content}', but '{by}' removed it; skipped.");
+            return;
+        }
+
+        if (json.Depth is int depth) { layer.LayerDepth = depth; Track(key + ".depth", modName); }
+        if (json.Visible is bool visible) { layer.IsVisible = visible; Track(key + ".visible", modName); }
+        if (json.X is float x) { layer.XOffset = x; Track(key + ".x", modName); }
+        if (json.Y is float y) { layer.YOffset = y; Track(key + ".y", modName); }
+        if (json.HSpeed is float hspeed) { layer.HSpeed = hspeed; Track(key + ".hspeed", modName); }
+        if (json.VSpeed is float vspeed) { layer.VSpeed = vspeed; Track(key + ".vspeed", modName); }
+
+        if (json.Grid is RoomGridJson grid)
+        {
+            UndertaleRoom.Layer.LayerTilesData tilesData = layer.TilesData;
+            if (grid.Tileset is string tileset) { tilesData.Background = tileset == "" ? null : Background(tileset); Track(key + ".tileset", modName); }
+            if (grid.Rows is uint[][] rows)
+            {
+                tilesData.TileData = rows.Select(r => (uint[])r.Clone()).ToArray();
+                tilesData.TilesX = rows.Length == 0 ? 0 : (uint)rows[0].Length;
+                tilesData.TilesY = (uint)rows.Length;
+                foreach (string cellKey in _changedBy.Keys.Where(k => k.StartsWith(key + ".cell ", StringComparison.Ordinal)).ToList())
+                    Track(cellKey, modName);
+                Track(key + ".grid", modName);
+            }
+            foreach (uint[] cell in grid.Cells ?? [])
+            {
+                if (cell[0] >= tilesData.TilesX || cell[1] >= tilesData.TilesY)
+                {
+                    Warnings.Add($"[{modName}] sets grid cell ({cell[0]}, {cell[1]}) in layer '{name}' of room '{room.Name.Content}', but another mod resized that grid to {tilesData.TilesX}x{tilesData.TilesY}; skipped.");
+                    continue;
+                }
+                tilesData.TileData[cell[1]][cell[0]] = cell[2];
+                string cellKey = $"{key}.cell {cell[0]},{cell[1]}";
+                if (!_changedBy.ContainsKey(cellKey) && _changedBy.TryGetValue(key + ".grid", out string? wholeGrid))
+                    _changedBy[cellKey] = wholeGrid;
+                Track(cellKey, modName);
+            }
+        }
+
+        if (json.Background is RoomLayerBackgroundJson bg)
+        {
+            UndertaleRoom.Layer.LayerBackgroundData bgData = layer.BackgroundData;
+            if (bg.Sprite is string sprite) { bgData.Sprite = sprite == "" ? null : Sprite(sprite); Track(key + ".sprite", modName); }
+            if (bg.Visible is bool bgVisible) { bgData.Visible = bgVisible; Track(key + ".backgroundVisible", modName); }
+            if (bg.Foreground is bool foreground) { bgData.Foreground = foreground; Track(key + ".foreground", modName); }
+            if (bg.TileX is bool tileX) { bgData.TiledHorizontally = tileX; Track(key + ".tileX", modName); }
+            if (bg.TileY is bool tileY) { bgData.TiledVertically = tileY; Track(key + ".tileY", modName); }
+            if (bg.Stretch is bool stretch) { bgData.Stretch = stretch; Track(key + ".stretch", modName); }
+            if (bg.Color is uint color) { bgData.Color = color; Track(key + ".color", modName); }
+            if (bg.FirstFrame is float firstFrame) { bgData.FirstFrame = firstFrame; Track(key + ".firstFrame", modName); }
+            if (bg.AnimationSpeed is float speed) { bgData.AnimationSpeed = speed; Track(key + ".animationSpeed", modName); }
+            if (bg.AnimationSpeedType is uint speedType) { bgData.AnimationSpeedType = (AnimationSpeedType)speedType; Track(key + ".animationSpeedType", modName); }
+        }
+
+        if (json.Tiles is RoomTilesJson layerTiles)
+            ApplyTiles(layer.AssetsData.LegacyTiles, layerTiles, roomKey, key + "#tiles", room.Name.Content, modName);
+
+        if (json.Sprites is RoomSpritesJson sprites)
+            ApplySprites(layer.AssetsData.Sprites, sprites, key, room.Name.Content, name, modName);
+    }
+
+    private UndertaleRoom.Layer NewLayer(UndertaleRoom room, string name, UndertaleRoom.LayerType type, int depth)
+    {
+        var layer = new UndertaleRoom.Layer
+        {
+            LayerName = data.Strings.MakeString(name),
+            LayerId = NextLayerId(),
+            LayerType = type,
+            LayerDepth = depth,
+            EffectEnabled = true,
+            Data = type switch
+            {
+                UndertaleRoom.LayerType.Instances => new UndertaleRoom.Layer.LayerInstancesData(),
+                UndertaleRoom.LayerType.Tiles => new UndertaleRoom.Layer.LayerTilesData { TileData = [] },
+                UndertaleRoom.LayerType.Background => new UndertaleRoom.Layer.LayerBackgroundData(),
+                UndertaleRoom.LayerType.Assets => new UndertaleRoom.Layer.LayerAssetsData
+                {
+                    LegacyTiles = new(),
+                    Sprites = new(),
+                    Sequences = data.IsVersionAtLeast(2, 3) ? new() : null,
+                    NineSlices = data.IsVersionAtLeast(2, 3) && !data.IsVersionAtLeast(2, 3, 2) ? new() : null,
+                    ParticleSystems = data.IsVersionAtLeast(2, 3) && data.IsNonLTSVersionAtLeast(2023, 2) ? new() : null,
+                    TextItems = data.IsVersionAtLeast(2024, 6) ? new() : null
+                },
+                _ => null
+            }
+        };
+        int at = 0;
+        while (at < room.Layers.Count && room.Layers[at].LayerDepth <= depth)
+            at++;
+        room.Layers.Insert(at, layer);
+        layer.ParentRoom = room;
+        return layer;
+    }
+
+    private uint? _nextLayerId;
+
+    private uint NextLayerId()
+    {
+        uint id = _nextLayerId ?? data.Rooms.SelectMany(r => r?.Layers ?? []).Select(l => l.LayerId + 1).DefaultIfEmpty(0u).Max();
+        _nextLayerId = id + 1;
+        return id;
+    }
+
+    private void ApplySprites(IList<UndertaleRoom.SpriteInstance> list, RoomSpritesJson sprites, string layerKey, string room, string layer, string modName)
+    {
+        foreach (string name in sprites.Remove)
+        {
+            string key = $"{layerKey}/sprite:{name}";
+            UndertaleRoom.SpriteInstance? sprite = list.FirstOrDefault(s => s.Name?.Content == name);
+            if (sprite is null)
+            {
+                if (_removedBy.TryGetValue(key, out string? by) && by != modName)
+                    Warnings.Add($"[{modName}] removes sprite '{name}' in layer '{layer}' of room '{room}', but '{by}' already removed it.");
+                continue;
+            }
+            list.Remove(sprite);
+            _removedBy[key] = modName;
+        }
+
+        foreach (RoomSpriteJson change in sprites.Change)
+        {
+            string key = $"{layerKey}/sprite:{change.Name}";
+            UndertaleRoom.SpriteInstance? sprite = list.FirstOrDefault(s => s.Name?.Content == change.Name);
+            if (sprite is null)
+            {
+                string by = _removedBy.GetValueOrDefault(key, modName);
+                Warnings.Add($"[{modName}] changes sprite '{change.Name}' in layer '{layer}' of room '{room}', but '{by}' removed it; skipped.");
+                continue;
+            }
+            if (change.Sprite is string asset) { sprite.Sprite = asset == "" ? null : Sprite(asset); Track(key + ".sprite", modName); }
+            if (change.X is int x) { sprite.X = x; Track(key + ".x", modName); }
+            if (change.Y is int y) { sprite.Y = y; Track(key + ".y", modName); }
+            if (change.ScaleX is float scaleX) { sprite.ScaleX = scaleX; Track(key + ".scaleX", modName); }
+            if (change.ScaleY is float scaleY) { sprite.ScaleY = scaleY; Track(key + ".scaleY", modName); }
+            if (change.Color is uint color) { sprite.Color = color; Track(key + ".color", modName); }
+            if (change.AnimationSpeed is float speed) { sprite.AnimationSpeed = speed; Track(key + ".animationSpeed", modName); }
+            if (change.AnimationSpeedType is uint speedType) { sprite.AnimationSpeedType = (AnimationSpeedType)speedType; Track(key + ".animationSpeedType", modName); }
+            if (change.FrameIndex is float frame) { sprite.FrameIndex = frame; Track(key + ".frameIndex", modName); }
+            if (change.Rotation is float rotation) { sprite.Rotation = rotation; Track(key + ".rotation", modName); }
+        }
+
+        foreach (RoomSpriteJson add in sprites.Add)
+        {
+            if (list.Any(s => s.Name?.Content == add.Name))
+            {
+                Warnings.Add($"[{modName}] adds sprite '{add.Name}' in layer '{layer}' of room '{room}', but another mod already added one with that name; skipped.");
+                continue;
+            }
+            int at = add.After is not string after
+                ? list.Count
+                : InsertAt(list, after == "" ? null : s => s.Name?.Content == after, after, $"{layerKey}#sprites", room, "sprite", modName);
+            list.Insert(at, new UndertaleRoom.SpriteInstance
+            {
+                Name = data.Strings.MakeString(add.Name!),
+                Sprite = string.IsNullOrEmpty(add.Sprite) ? null : Sprite(add.Sprite),
+                X = add.X ?? 0,
+                Y = add.Y ?? 0,
+                ScaleX = add.ScaleX ?? 1,
+                ScaleY = add.ScaleY ?? 1,
+                Color = add.Color ?? 0xFFFFFFFF,
+                AnimationSpeed = add.AnimationSpeed ?? 1,
+                AnimationSpeedType = (AnimationSpeedType)(add.AnimationSpeedType ?? 0),
+                FrameIndex = add.FrameIndex ?? 0,
+                Rotation = add.Rotation ?? 0
+            });
+        }
+    }
+
+    private void ApplyTiles(IList<UndertaleRoom.Tile> list, RoomTilesJson tiles, string roomKey, string listKey, string room, string modName)
+    {
+        bool sprites = data.IsGameMaker2();
         foreach (uint id in tiles.Remove)
         {
             string key = $"{roomKey}#tile{id}";
-            UndertaleRoom.Tile? tile = room.Tiles.FirstOrDefault(t => t.InstanceID == id);
+            UndertaleRoom.Tile? tile = list.FirstOrDefault(t => t.InstanceID == id);
             if (tile is null)
             {
                 if (_removedBy.TryGetValue(key, out string? by) && by != modName)
-                    Warnings.Add($"[{modName}] removes tile {id} in room '{room.Name.Content}', but '{by}' already removed it.");
+                    Warnings.Add($"[{modName}] removes tile {id} in room '{room}', but '{by}' already removed it.");
                 continue;
             }
-            room.Tiles.Remove(tile);
+            list.Remove(tile);
             _removedBy[key] = modName;
         }
 
@@ -291,14 +658,15 @@ public sealed class RoomImporter(UndertaleData data)
         {
             uint id = change.Id!.Value;
             string key = $"{roomKey}#tile{id}";
-            UndertaleRoom.Tile? tile = room.Tiles.FirstOrDefault(t => t.InstanceID == id);
+            UndertaleRoom.Tile? tile = list.FirstOrDefault(t => t.InstanceID == id);
             if (tile is null)
             {
                 string by = _removedBy.GetValueOrDefault(key, modName);
-                Warnings.Add($"[{modName}] changes tile {id} in room '{room.Name.Content}', but '{by}' removed it; skipped.");
+                Warnings.Add($"[{modName}] changes tile {id} in room '{room}', but '{by}' removed it; skipped.");
                 continue;
             }
-            if (change.Background is not null) { tile.BackgroundDefinition = Background(change.Background); Track(key + ".background", modName); }
+            if (!sprites && change.Background is not null) { tile.BackgroundDefinition = Background(change.Background); Track(key + ".background", modName); }
+            if (sprites && change.Sprite is not null) { tile.SpriteDefinition = Sprite(change.Sprite); Track(key + ".sprite", modName); }
             if (change.X is int x) { tile.X = x; Track(key + ".x", modName); }
             if (change.Y is int y) { tile.Y = y; Track(key + ".y", modName); }
             if (change.SourceX is int sourceX) { tile.SourceX = sourceX; Track(key + ".sourceX", modName); }
@@ -313,10 +681,10 @@ public sealed class RoomImporter(UndertaleData data)
 
         foreach (RoomTileJson add in tiles.Add)
         {
-            room.Tiles.Insert(InsertIndex(room.Tiles, t => t.InstanceID, add.After, $"{roomKey}#tiles", room.Name.Content, "tile", modName), new UndertaleRoom.Tile
+            var tile = new UndertaleRoom.Tile
             {
+                spriteMode = sprites,
                 InstanceID = data.GeneralInfo.LastTile++,
-                BackgroundDefinition = Background(add.Background!),
                 X = add.X ?? 0,
                 Y = add.Y ?? 0,
                 SourceX = add.SourceX ?? 0,
@@ -327,21 +695,30 @@ public sealed class RoomImporter(UndertaleData data)
                 ScaleX = add.ScaleX ?? 1,
                 ScaleY = add.ScaleY ?? 1,
                 Color = add.Color ?? 0xFFFFFFFF
-            });
+            };
+            if (sprites)
+                tile.SpriteDefinition = Sprite(add.Sprite!);
+            else
+                tile.BackgroundDefinition = Background(add.Background!);
+            list.Insert(InsertIndex(list, t => t.InstanceID, add.After, listKey, room, "tile", modName), tile);
         }
     }
 
-    private readonly Dictionary<(string List, uint After), int> _insertedAfter = new();
+    private readonly Dictionary<(string List, string After), int> _insertedAfter = new();
+    private readonly Dictionary<string, string> _addedLayers = new();
 
-    private int InsertIndex<T>(IList<T> list, Func<T, uint> idOf, uint? after, string listKey, string room, string kind, string modName)
+    private int InsertIndex<T>(IList<T> list, Func<T, uint> idOf, uint? after, string listKey, string room, string kind, string modName) =>
+        after is not uint anchor
+            ? list.Count
+            : InsertAt(list, anchor == 0 ? null : item => idOf(item) == anchor, anchor.ToString(), listKey, room, kind, modName);
+
+    private int InsertAt<T>(IList<T> list, Func<T, bool>? isAnchor, string anchor, string listKey, string room, string kind, string modName)
     {
-        if (after is not uint anchor)
-            return list.Count;
         int anchorIndex = -1;
-        if (anchor != 0)
+        if (isAnchor is not null)
         {
             for (int i = 0; i < list.Count; i++)
-                if (idOf(list[i]) == anchor) { anchorIndex = i; break; }
+                if (isAnchor(list[i])) { anchorIndex = i; break; }
             if (anchorIndex < 0)
             {
                 Warnings.Add($"[{modName}] places a new {kind} after {kind} {anchor} in room '{room}', but that {kind} was removed; it was added at the end.");
@@ -358,6 +735,12 @@ public sealed class RoomImporter(UndertaleData data)
 
     private UndertaleBackground Background(string name) =>
         data.Backgrounds.ByName(name) ?? throw new InvalidOperationException($"Background '{name}' doesn't exist.");
+
+    private UndertaleSprite Sprite(string name) =>
+        data.Sprites.ByName(name) ?? throw new InvalidOperationException($"Sprite '{name}' doesn't exist.");
+
+    private static UndertaleRoom.RoomEntryFlags WithFlag(UndertaleRoom.RoomEntryFlags flags, UndertaleRoom.RoomEntryFlags flag, bool on) =>
+        on ? flags | flag : flags & ~flag;
 
     private static UndertaleRoom.Layer? FindLayer(UndertaleRoom room, string name) =>
         RoomLayers.InstanceLayers(room).FirstOrDefault(l => l.LayerName?.Content == name);

@@ -252,18 +252,27 @@ public class RoomPartsTests : IDisposable
     }
 
     [Fact]
-    public async Task A_new_room_in_a_layered_game_is_refused()
+    public async Task A_new_room_in_a_layered_game_gets_GameMaker_2_room_settings()
     {
         string? chapter = TestPaths.DeltaruneChapter;
         if (chapter is null) { _out.WriteLine("Deltarune chapter not found — skipping."); return; }
         string src = Path.Combine(chapter, "data.win");
         UndertaleData probe = Load(src);
-        string mod = Mod(probe, "LayeredRoomMod", "room_pjum_layered", "{ }", "\"rooms\": { \"room_pjum_layered\": {} }");
+        string mod = Mod(probe, "LayeredRoomMod", "room_pjum_layered", "{ \"layers\": [ { \"name\": \"Instances\", \"new\": true, \"type\": \"Instances\" } ] }", "\"rooms\": { \"room_pjum_layered\": {} }");
 
-        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(Game(src), new List<ModSource> { new("LayeredRoomMod", mod) });
+        string game = Game(src);
+        MergeResult result = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("LayeredRoomMod", mod) });
+        Assert.True(result.Success, result.Reason);
 
-        Assert.False(result.Success);
-        Assert.Contains("can only create rooms in GameMaker 1 games", result.Reason);
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        UndertaleRoom r = after.Rooms.ByName("room_pjum_layered");
+        Assert.Same(r, after.GeneralInfo.RoomOrder[^1].Resource);
+        Assert.True(r.Flags.HasFlag(UndertaleRoom.RoomEntryFlags.IsGMS2) && r.Flags.HasFlag(UndertaleRoom.RoomEntryFlags.IsGMS2_3));
+        Assert.Null(r.Caption);
+        Assert.Empty(r.Backgrounds);
+        UndertaleRoom.Layer layer = Assert.Single(r.Layers);
+        Assert.Equal(("Instances", UndertaleRoom.LayerType.Instances), (layer.LayerName.Content, layer.LayerType));
+        Assert.Equal(probe.Rooms.SelectMany(x => x.Layers).Max(l => l.LayerId) + 1, layer.LayerId);
     }
 
     [Fact]
