@@ -95,6 +95,9 @@ public sealed class RoomImporter(UndertaleData data)
         foreach (uint id in json.Remove)
             CheckId(id, "\"remove\"");
 
+        if (json.Settings?.CreationCode is string roomCode && roomCode != "" && data.Code.ByName(roomCode) is null && !newCode.Contains(roomCode))
+            throw new InvalidOperationException($"Room '{room.Name.Content}' uses creation code '{roomCode}', which doesn't exist and isn't one of the mods' code files.");
+
         void CheckBackground(string? name, string where)
         {
             if (name is not null && data.Backgrounds.ByName(name) is null && !newBackgrounds.Contains(name))
@@ -377,6 +380,15 @@ public sealed class RoomImporter(UndertaleData data)
             if (settings.EnableViews is bool views) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.EnableViews, views); Track(roomKey + ".enableViews", modName); }
             if (settings.ClearViewBackground is bool clearView) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.ClearViewBackground, clearView); Track(roomKey + ".clearViewBackground", modName); }
             if (settings.DoNotClearDisplayBuffer is bool keepDisplay) { room.Flags = WithFlag(room.Flags, UndertaleRoom.RoomEntryFlags.DoNotClearDisplayBuffer, keepDisplay); Track(roomKey + ".doNotClearDisplayBuffer", modName); }
+            if (settings.CreationCode is string creationCode) { room.CreationCodeId = Code(creationCode); Track(roomKey + ".creationCode", modName); }
+            if (settings.PhysicsWorld is bool world) { room.World = world; Track(roomKey + ".physicsWorld", modName); }
+            if (settings.PhysicsTop is uint top) { room.Top = top; Track(roomKey + ".physicsTop", modName); }
+            if (settings.PhysicsLeft is uint left) { room.Left = left; Track(roomKey + ".physicsLeft", modName); }
+            if (settings.PhysicsRight is uint right) { room.Right = right; Track(roomKey + ".physicsRight", modName); }
+            if (settings.PhysicsBottom is uint bottom) { room.Bottom = bottom; Track(roomKey + ".physicsBottom", modName); }
+            if (settings.GravityX is float gravityX) { room.GravityX = gravityX; Track(roomKey + ".gravityX", modName); }
+            if (settings.GravityY is float gravityY) { room.GravityY = gravityY; Track(roomKey + ".gravityY", modName); }
+            if (settings.MetersPerPixel is float metersPerPixel) { room.MetersPerPixel = metersPerPixel; Track(roomKey + ".metersPerPixel", modName); }
         }
 
         foreach (RoomBackgroundJson slot in json.Backgrounds ?? [])

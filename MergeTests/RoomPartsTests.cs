@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ImageMagick;
 using UndertaleModLib;
+using UndertaleModLib.Compiler;
 using UndertaleModLib.Models;
 using UndertaleModLib.Util;
 using Project_Jumpstart_Undertale_Mod_Manager.Services.Data;
@@ -149,6 +150,7 @@ public class RoomPartsTests : IDisposable
     [InlineData("{ \"tiles\": { \"change\": [ { \"id\": 4000000000, \"x\": 1 } ] } }", "has no tile 4000000000")]
     [InlineData("{ \"tiles\": { \"add\": [ { \"background\": \"bg_pjum_nope\" } ] } }", "uses background 'bg_pjum_nope', which doesn't exist")]
     [InlineData("{ \"backgrounds\": [ { \"slot\": 99, \"enabled\": true } ] }", "not 99")]
+    [InlineData("{ \"settings\": { \"creationCode\": \"gml_pjum_missing\" } }", "uses creation code 'gml_pjum_missing', which doesn't exist")]
     public async Task A_bad_room_part_fails_before_anything_is_written(string json, string expected)
     {
         string? src = TestPaths.UndertaleDataWin;
@@ -310,6 +312,43 @@ public class RoomPartsTests : IDisposable
         static string View(UndertaleRoom.View v) => $"{v.Enabled} {v.ViewX},{v.ViewY},{v.ViewWidth},{v.ViewHeight} {v.PortX},{v.PortY},{v.PortWidth},{v.PortHeight}";
         Assert.Equal(room.Views.Select(View), r.Views.Select(View));
         Assert.Equal(room.GameObjects.Select(g => (g.ObjectDefinition.Name.Content, g.X, g.Y)), r.GameObjects.Select(g => (g.ObjectDefinition.Name.Content, g.X, g.Y)));
+    }
+
+    [Fact]
+    public async Task Room_creation_code_and_physics_extract_and_rebuild()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        UndertaleData original = Load(src);
+        UndertaleData modded = Load(src);
+        UndertaleRoom gainsCode = modded.Rooms.First(r => r?.CreationCodeId is null);
+        UndertaleRoom losesCode = modded.Rooms.First(r => r?.CreationCodeId is not null);
+        UndertaleRoom physics = modded.Rooms.First(r => r is not null && r != gainsCode && r != losesCode);
+        string codeName = $"gml_Room_{gainsCode.Name.Content}_Create";
+        var group = new CodeImportGroup(modded);
+        group.QueueReplace(codeName, "pjum_room_marker = 3;");
+        Assert.True(group.Import(false).Successful);
+        gainsCode.CreationCodeId = modded.Code.ByName(codeName);
+        losesCode.CreationCodeId = null;
+        physics.World = true;
+        physics.GravityY = 5;
+        physics.Right = 640;
+        string folder = Path.GetDirectoryName(src)!;
+        string mod = Path.Combine(_root, "ExtractedRoomCode");
+
+        ExtractResult result = ModExtractor.Extract(original, modded, folder, folder, mod, "Extracted room code");
+        foreach (string note in result.NotConverted) _out.WriteLine("note: " + note);
+        Assert.DoesNotContain(result.NotConverted, n => new[] { gainsCode, losesCode, physics }.Any(r => n.Contains($"'{r.Name.Content}'")));
+
+        string game = Game(src);
+        MergeResult merge = await new ModMergeService(new DirectDataService()).ApplyAsync(game, new List<ModSource> { new("Extracted room code", mod) });
+        Assert.True(merge.Success, merge.Reason);
+
+        UndertaleData after = Load(Path.Combine(game, "data.win"));
+        Assert.Equal(codeName, after.Rooms.ByName(gainsCode.Name.Content).CreationCodeId?.Name?.Content);
+        Assert.Null(after.Rooms.ByName(losesCode.Name.Content).CreationCodeId);
+        UndertaleRoom p = after.Rooms.ByName(physics.Name.Content);
+        Assert.Equal((true, 5f, 640u, physics.Bottom, physics.GravityX, physics.MetersPerPixel), (p.World, p.GravityY, p.Right, p.Bottom, p.GravityX, p.MetersPerPixel));
     }
 
     [Fact]
