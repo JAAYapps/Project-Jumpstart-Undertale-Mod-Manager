@@ -264,6 +264,32 @@ public class ModExtractTests : IDisposable
     }
 
     [Fact]
+    public async Task Code_that_uses_an_added_instance_number_gets_a_note()
+    {
+        string? src = TestPaths.UndertaleDataWin;
+        if (src is null) { _out.WriteLine("Undertale not found — skipping."); return; }
+        var io = new DirectDataService();
+        UndertaleData data = await io.LoadAsync(src);
+        UndertaleRoom room = data.Rooms.First(r => r?.GameObjects.Count >= 1 && r.GameObjects[0].ObjectDefinition is not null);
+        var added = new UndertaleRoom.GameObject { InstanceID = data.GeneralInfo.LastObj++, ObjectDefinition = room.GameObjects[0].ObjectDefinition, X = 3, Y = 4 };
+        room.GameObjects.Add(added);
+        uint kept = room.GameObjects[0].InstanceID;
+        string script = data.IsVersionAtLeast(2, 3) ? "gml_GlobalScript_pjum_by_instance" : "gml_Script_pjum_by_instance";
+        var group = new CodeImportGroup(data);
+        group.QueueReplace(script, $"pjum_added = {added.InstanceID};\npjum_kept = {kept};");
+        Assert.True(group.Import(false).Successful);
+        string modded = Path.Combine(_root, "modded.win");
+        await io.SaveAsync(data, modded);
+
+        string mod = Path.Combine(_root, "InstanceNumberMod");
+        ExtractResult result = await new ModExtractService(io).ExtractAsync(src, modded, mod, "Instance number test mod");
+        foreach (string note in result.NotConverted) _out.WriteLine("not converted: " + note);
+
+        Assert.Contains(result.NotConverted, n => n.Contains($"Code '{script}' line 1") && n.Contains($"{added.InstanceID} may mean instance {added.InstanceID} that the mod adds in room '{room.Name.Content}'"));
+        Assert.DoesNotContain(result.NotConverted, n => n.Contains($"{kept} may mean"));
+    }
+
+    [Fact]
     public async Task Event_code_entries_that_share_a_name_keep_their_own_code()
     {
         string? src = TestPaths.UndertaleDataWin;
