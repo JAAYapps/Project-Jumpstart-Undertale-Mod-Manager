@@ -85,7 +85,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             if (!renames.TryAdd(mod.Name, manifests[mod.Name].Renames, out string renameError))
                 return MergeResult.Fail(mod.Name, renameError);
         renames.Apply();
-        (int Sprites, int Backgrounds, int Sounds, int Objects) firstNew = (data.Sprites.Count, data.Backgrounds.Count, data.Sounds.Count, data.GameObjects.Count);
+        (int Sprites, int Backgrounds, int Sounds, int Objects, int Fonts) firstNew = (data.Sprites.Count, data.Backgrounds.Count, data.Sounds.Count, data.GameObjects.Count, data.Fonts.Count);
         List<string> NewAssetOrder(string category) =>
             mods.SelectMany(m => manifests[m.Name].NewAssets.TryGetValue(category, out var byName) ? byName.Keys : Enumerable.Empty<string>()).ToList();
 
@@ -246,6 +246,33 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
                 return MergeResult.Fail(pa.OwningMod, $"cannot apply {pa.Address.RelativePath}: {ex.Message}");
             }
         }
+        var fontInfos = new Dictionary<string, (FontJson Json, string Mod)>();
+        foreach (PlannedAsset pa in plan.Values.Where(p => p.Address.Category == AssetCategory.FontInfo))
+        {
+            try
+            {
+                fontInfos[pa.Address.AssetName] = (Fonts.FontImporter.ReadJson(pa.SourceFile), pa.OwningMod);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(pa.OwningMod, $"cannot apply {pa.Address.RelativePath}: {ex.Message}");
+            }
+        }
+        var fontPictures = plan.Values.Where(p => p.Address.Category == AssetCategory.Fonts).ToDictionary(p => p.Address.AssetName, p => p.OwningMod);
+        var newFonts = new HashSet<string>(plan.Where(kv => kv.Value.Address.Category is AssetCategory.Fonts or AssetCategory.FontInfo && resolutions[kv.Key] == ResolutionKind.Create)
+                                               .Select(kv => kv.Value.Address.AssetName));
+        foreach (string font in newFonts)
+        {
+            string owner = fontInfos.TryGetValue(font, out var info) ? info.Mod : fontPictures[font];
+            if (!fontPictures.ContainsKey(font))
+                return MergeResult.Fail(owner, $"font '{font}' is new, so it needs its picture fonts/{font}.png.");
+            if (info.Json?.Glyphs is null)
+                return MergeResult.Fail(owner, $"font '{font}' is new, so it needs fonts/{font}.json with its \"glyphs\" (where each letter is in the picture).");
+        }
+        foreach ((string font, (FontJson json, string mod)) in fontInfos)
+            if (json.Glyphs is not null && fontPictures.TryGetValue(font, out string? pictureMod) && pictureMod != mod)
+                warnings.Add($"Font '{font}': its letters come from '{mod}', but its picture comes from '{pictureMod}'. If the two don't match, letters will show the wrong part of the picture.");
+
         var spriteBoxes = spriteInfos.Where(kv => kv.Value.Json.Width is not null && kv.Value.Json.Height is not null)
                                      .ToDictionary(kv => kv.Key, kv => (kv.Value.Json.Width!.Value, kv.Value.Json.Height!.Value));
         var spriteMasks = new Dictionary<string, (List<(int Index, string File)> Files, string Mod)>();
@@ -390,7 +417,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
 
             if (anyTexture)
             {
-                RepackResult rr = await _repacker.RepackAsync(data, overridesDir, spriteBoxes, newBackgrounds);
+                RepackResult rr = await _repacker.RepackAsync(data, overridesDir, spriteBoxes, newBackgrounds, newFonts);
                 warnings.AddRange(rr.Warnings);
             }
         }
@@ -399,6 +426,21 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
             TryDelete(overridesDir);
         }
         
+        foreach ((string fontName, (FontJson json, string mod)) in fontInfos)
+        {
+            UndertaleFont? font = data.Fonts.ByName(fontName);
+            if (font is null)
+                return MergeResult.Fail(mod, $"font '{fontName}' has a fonts/{fontName}.json, but no picture, and isn't in this game.");
+            try
+            {
+                Fonts.FontImporter.Apply(data, font, json);
+            }
+            catch (Exception ex)
+            {
+                return MergeResult.Fail(mod, $"failed applying font {fontName}: {ex.Message}");
+            }
+        }
+
         foreach (string spriteName in spriteInfos.Keys.Union(spriteMasks.Keys))
         {
             bool hasInfo = spriteInfos.TryGetValue(spriteName, out var info);
@@ -440,6 +482,7 @@ public sealed class ModMergeService(Data.IDataService dataService) : IModMergeSe
         OrderNewAssets(data.Backgrounds, firstNew.Backgrounds, NewAssetOrder("backgrounds"));
         OrderNewAssets(data.Sounds, firstNew.Sounds, NewAssetOrder("sounds"));
         OrderNewAssets(data.GameObjects, firstNew.Objects, NewAssetOrder("objects"));
+        OrderNewAssets(data.Fonts, firstNew.Fonts, NewAssetOrder("fonts"));
 
         // === PHASE 5d: code -> CodeImportGroup ================================
         if (codeOps.Count > 0)

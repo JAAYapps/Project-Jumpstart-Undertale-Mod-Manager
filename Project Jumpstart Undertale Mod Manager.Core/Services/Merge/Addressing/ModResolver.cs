@@ -54,9 +54,12 @@ public static class ModResolver
         if (addr.Category == AssetCategory.Files)
             return new ResolvedAsset(ResolutionKind.Replace, addr, null, null);
 
-        string category = addr.Category is AssetCategory.SpriteMasks or AssetCategory.SpriteInfo
-            ? "sprites"
-            : addr.Category.ToString().ToLowerInvariant();
+        string category = addr.Category switch
+        {
+            AssetCategory.SpriteMasks or AssetCategory.SpriteInfo => "sprites",
+            AssetCategory.FontInfo => "fonts",
+            _ => addr.Category.ToString().ToLowerInvariant()
+        };
         string name = addr.AssetName;
 
         object? existing = LookupByName(addr.Category, data, name, out bool categorySupported);
@@ -108,6 +111,7 @@ public static class ModResolver
             case AssetCategory.SpriteInfo:  return data.Sprites.ByName(name);
             case AssetCategory.Backgrounds: return data.Backgrounds.ByName(name);
             case AssetCategory.Fonts:       return data.Fonts.ByName(name);
+            case AssetCategory.FontInfo:    return data.Fonts.ByName(name);
             case AssetCategory.Code:        return data.Code.ByName(name);
             case AssetCategory.Objects:     return data.GameObjects.ByName(name);
             case AssetCategory.Sounds:      return data.Sounds.ByName(name);
@@ -124,7 +128,7 @@ public static class ModResolver
     {
         if (addressed is not (AssetCategory.Sprites or AssetCategory.SpriteMasks or AssetCategory.SpriteInfo) && data.Sprites.ByName(name) is not null) return "sprite";
         if (addressed != AssetCategory.Backgrounds && data.Backgrounds.ByName(name) is not null) return "background";
-        if (addressed != AssetCategory.Fonts       && data.Fonts.ByName(name)       is not null) return "font";
+        if (addressed is not (AssetCategory.Fonts or AssetCategory.FontInfo) && data.Fonts.ByName(name) is not null) return "font";
         if (addressed != AssetCategory.Code        && data.Code.ByName(name)        is not null) return "code";
         if (addressed != AssetCategory.Objects     && data.GameObjects.ByName(name) is not null) return "object";
         if (addressed != AssetCategory.Sounds      && data.Sounds.ByName(name)      is not null) return "sound";

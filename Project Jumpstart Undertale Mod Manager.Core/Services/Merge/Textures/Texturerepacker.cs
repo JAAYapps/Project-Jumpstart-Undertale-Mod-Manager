@@ -84,7 +84,7 @@ public sealed class TextureRepacker
     /// <paramref name="overridesDir"/> (flat naming, see file header) replace
     /// any base asset with the same name and add brand-new sprites.
     /// </summary>
-    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes = null, IReadOnlySet<string>? newBackgrounds = null)
+    public async Task<RepackResult> RepackAsync(UndertaleData data, string overridesDir, IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes = null, IReadOnlySet<string>? newBackgrounds = null, IReadOnlySet<string>? newFonts = null)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
         if (!Directory.Exists(overridesDir))
@@ -107,6 +107,8 @@ public sealed class TextureRepacker
             await ExportExistingAsync(data, texturesDir, assetCoordinateDict, assetTypeDict);
             foreach (string name in newBackgrounds ?? new HashSet<string>())
                 assetTypeDict.TryAdd(name, "bg");
+            foreach (string name in newFonts ?? new HashSet<string>())
+                assetTypeDict.TryAdd(name, "fnt");
 
             // 2. Overlay the mod's overrides (same filename => overwrite => mod wins).
             foreach (string src in Directory.GetFiles(overridesDir, "*.png", SearchOption.AllDirectories))
@@ -153,7 +155,7 @@ public sealed class TextureRepacker
             
             // 5. Rebuild the graph from the packed atlases.
             warnings.AddRange(packer.Errors);
-            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, overrideNames, spriteBoxes, warnings);
+            var pageItems = RebuildGraph(data, packer, atlasDescPath, assetCoordinateDict, assetTypeDict, overrideNames, spriteBoxes, newFonts, warnings);
             KeepUnpackedOriginals(data, warnings);
 
             // Repoint TextureGroupInfo (TGIN) at the freshly-built pages. The old page
@@ -274,6 +276,7 @@ public sealed class TextureRepacker
         Dictionary<string, string> types,
         HashSet<string> overrideNames,
         IReadOnlyDictionary<string, (uint Width, uint Height)>? spriteBoxes,
+        IReadOnlySet<string>? newFonts,
         List<string> warnings)
     {
         int lastTextPage = data.EmbeddedTextures.Count - 1;
@@ -327,7 +330,7 @@ public sealed class TextureRepacker
                         WireBackground(data, stripped, pageItem, warnings);
                         break;
                     case "fnt":
-                        WireFont(data, stripped, pageItem, warnings);
+                        WireFont(data, stripped, pageItem, newFonts, warnings);
                         break;
                     default: // "spr"
                         WireSprite(data, stripped, pageItem, n, atlasPixels, warnings);
@@ -461,9 +464,14 @@ public sealed class TextureRepacker
         bg.Texture = pageItem;
     }
 
-    private static void WireFont(UndertaleData data, string name, UndertaleTexturePageItem pageItem, List<string> warnings)
+    private static void WireFont(UndertaleData data, string name, UndertaleTexturePageItem pageItem, IReadOnlySet<string>? newFonts, List<string> warnings)
     {
         UndertaleFont font = data.Fonts.ByName(name);
+        if (font is null && newFonts?.Contains(name) == true)
+        {
+            data.Fonts.Add(new UndertaleFont { Name = data.Strings.MakeString(name), DisplayName = data.Strings.MakeString(name), Texture = pageItem });
+            return;
+        }
         if (font is null)
         {
             warnings.Add($"Font '{name}' not found in data; skipped. (Creating new fonts isn't supported yet.)");
