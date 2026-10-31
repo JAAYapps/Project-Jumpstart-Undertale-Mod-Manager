@@ -41,4 +41,10 @@
     <ItemGroup>
       <ProjectReference Include="..\Project Jumpstart Undertale Mod Manager.Core\Project Jumpstart Undertale Mod Manager.Core.csproj" />
     </ItemGroup>
+
+    <Target Name="SkipNativeSymbolsOnPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+        <ItemGroup>
+            <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' And '%(ResolvedFileToPublish.AssetType)' == 'native'" />
+        </ItemGroup>
+    </Target>
 </Project>
